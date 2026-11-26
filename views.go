@@ -82,7 +82,7 @@ func (a *app) appTitle(c *ui.Context, k *colors) {
 		if b := appIcon(); b != nil {
 			ui.Image(c, b).Size(22, 22)
 		}
-		ui.Text(c, appName).FontSize(14).FontWeight(700).TextColor(k.text.Alpha(0.85)).SingleLine()
+		ui.Text(c, desktopBuildName(a.desktopManaged)).FontSize(14).FontWeight(700).TextColor(k.text.Alpha(0.85)).SingleLine()
 		if a.version != "" {
 			ui.Text(c, "v"+a.version).FontSize(12).TextColor(k.textFaint).SingleLine()
 		}
@@ -765,8 +765,9 @@ func selectOf[T comparable](c *ui.Context, value *T, values []T, label func(T) s
 func (a *app) settingsPages() []settingsPage {
 	interfacePage := settingsPage{"interface", "sliders-horizontal", locales.Interface(), func(c *ui.Context, k *colors) {
 		settingRow(c, k, locales.Appearance(), "", func() {
-			if selectValue(c, &a.cfg.Theme, []string{"", "light", "dark"}, themeName) {
-				setThemeSource(a.cfg.Theme)
+			if selectValue(c, &a.appearance, []string{"", "light", "dark"}, themeName) {
+				a.cfg.Theme = a.appearance
+				setThemeSource(a.appearance)
 				a.saveConfig()
 			}
 		})

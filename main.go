@@ -68,6 +68,8 @@ type app struct {
 	editErr            string
 	settingsOpen       bool
 	settingsPage       string // the settings page shown
+	appearance         string // active UI mode; Desktop can override it for this process
+	desktopManaged     string
 	quality, compress  float64
 	maxFPS, maxKbps    float64
 	gop                float64
@@ -750,13 +752,13 @@ func (a *app) setName(t *tab, name string) {
 // as "desktop - MyVNC (ARD DH, encrypted)"; the window shows the active
 // tab's.
 func (a *app) setTitle(t *tab, encrypted bool) {
-	title := appName
+	title := desktopBuildName(a.desktopManaged)
 	if t.sess != nil {
 		enc := "no"
 		if encrypted {
 			enc = "yes"
 		}
-		title = locales.TitleSession(t.name, appName, viewer.SecTypeName(t.secType), enc)
+		title = locales.TitleSession(t.name, desktopBuildName(a.desktopManaged), viewer.SecTypeName(t.secType), enc)
 	}
 	if title != t.title {
 		t.title = title
@@ -1360,7 +1362,7 @@ func (a *app) connectRDP(t *tab, target viewer.Target, server string) {
 		}
 	}
 	t.name = "RDP " + host
-	t.title = t.name + " - " + appName
+	t.title = t.name + " - " + desktopBuildName(a.desktopManaged)
 	if t == a.active {
 		a.win.SetTitle(t.title)
 	}
@@ -1751,9 +1753,11 @@ func main() {
 		fmt.Print(usage())
 		return
 	}
-	setThemeSource(a.cfg.Theme)
+	a.desktopManaged = os.Getenv(desktopManagedEnv)
+	a.appearance = desktopAppearance(a.cfg.Theme, a.desktopManaged, os.Getenv(desktopThemeEnv))
+	setThemeSource(a.appearance)
 	mygo.App.SetLocale(a.cfg.Language) // the setting is the config's
-	if perf == nil {                   // perf runs never check for updates
+	if useStandaloneUpdater(a.desktopManaged, perf != nil) {
 		mygo.Use(native.New(updater.Options{Language: a.cfg.Language}))
 		a.upds = &updateHooks{
 			check:   updater.CheckForUpdates,
@@ -1775,7 +1779,7 @@ func main() {
 		// window's controls; the hidden title bar keeps the window's top
 		// edge, which resizes it.
 		win := mygo.NewWindow(mygo.WindowOptions{
-			Title:             appName,
+			Title:             desktopBuildName(a.desktopManaged),
 			Width:             1024,
 			Height:            720,
 			MinWidth:          420,

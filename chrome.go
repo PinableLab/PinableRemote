@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	titleH = 44 // the title bar
-	cardR  = 12 // the cards' corners
+	titleH        = 44 // also used by the native RDP viewport
+	cardR         = 10
+	controlRadius = 7
+	controlMotion = 120 * time.Millisecond
 )
 
 // ownControls tells that the title bar draws the window's controls: on
@@ -91,7 +93,7 @@ func windowControls(c *ui.Context, k *colors, win *mygo.Window, beside bool) {
 				win.Maximize()
 			}
 		}
-		b := ui.Box(c).Size(30, 30).Center().Radius(30 / 2.6).Cursor(ui.CursorPointer).Role(ui.RoleButton).
+		b := ui.ButtonBase(c).Size(30, 30).Radius(controlRadius).Cursor(ui.CursorPointer).Role(ui.RoleButton).
 			Label(locales.WindowClose())
 		barTip(c, k, b, locales.WindowClose(), beside, false)
 		col := k.iconMuted
@@ -102,7 +104,8 @@ func windowControls(c *ui.Context, k *colors, win *mygo.Window, beside bool) {
 			b.Background(closeRed)
 			col = ui.Hex("#ffffff")
 		}
-		b.Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+		focusOutline(b, k)
+		b.Transition(ui.ElementTransition{Colors: true, Duration: controlMotion})
 		b.Children(func() {
 			ui.Icon(c, icon("x")).Size(17, 17).TextColor(col)
 		})
@@ -115,13 +118,8 @@ func windowControls(c *ui.Context, k *colors, win *mygo.Window, beside bool) {
 // iconButton is a borderless button of an icon, with a face on hover;
 // label names it for screen readers.
 func iconButton(c *ui.Context, k *colors, name, label string, size, iconSize float32) ui.Element {
-	b := ui.Box(c).Size(size, size).Shrink(0).Center().Radius(size / 2.6).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(label)
-	if b.Pressed() {
-		b.Background(k.pressed)
-	} else if b.Hovered() {
-		b.Background(k.hover)
-	}
-	b.Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+	b := ui.ButtonBase(c).Size(size, size).Radius(controlRadius).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(label)
+	controlInteraction(b, k, false)
 	col := k.iconMuted
 	if b.Hovered() {
 		col = k.text
@@ -132,26 +130,46 @@ func iconButton(c *ui.Context, k *colors, name, label string, size, iconSize flo
 	return b
 }
 
-// card gives e the look of a card: translucent white on the gradient.
+// focusOutline preserves a stable control footprint while exposing keyboard focus.
+func focusOutline(e ui.Element, k *colors) {
+	e.FocusRingColor(k.focus).FocusRingOffset(-2)
+}
+
+func controlInteraction(e ui.Element, k *colors, selected bool) {
+	switch {
+	case e.Pressed():
+		e.Background(k.pressed)
+	case selected:
+		e.Background(k.tabActive)
+	case e.Hovered():
+		e.Background(k.hover)
+	}
+	focusOutline(e, k)
+	e.Transition(ui.ElementTransition{Colors: true, Duration: controlMotion})
+}
+
+func cardInteraction(e ui.Element, k *colors) ui.Element {
+	if e.Pressed() || e.Hovered() {
+		e.Background(k.cardFocused).BorderColor(k.cardBorderFocused)
+	}
+	focusOutline(e, k)
+	return e.Transition(ui.ElementTransition{Colors: true, Duration: controlMotion})
+}
+
 func card(e ui.Element, k *colors) ui.Element {
-	return e.Radius(cardR).Background(k.card).Border(1, k.cardBorder).
-		Shadow(0, 1, 2, 0, k.shadow).Shadow(0, 6, 22, -2, k.shadow)
+	return e.Radius(cardR).Background(k.card).Border(1, k.cardBorder)
 }
 
 // panelLook gives e the look of a popover's or dialog's panel.
 func panelLook(e ui.Element, k *colors) ui.Element {
-	return e.Radius(14).Background(k.panel).Border(1, k.panelBorder).Shadow(0, 12, 32, 0, k.shadowFocused)
+	return e.Radius(cardR).Background(k.panel).Border(1, k.panelBorder).Shadow(0, 12, 32, 0, k.shadowFocused)
 }
 
 // textButton is a borderless button of text in the accent color, as a
 // banner's or a transfer's.
 func textButton(c *ui.Context, k *colors, label string) ui.Element {
-	b := ui.ButtonBase(c).Label(label).Padding(4, 10).Radius(8).Shrink(0)
-	if b.Pressed() {
-		b.Background(k.pressed)
-	} else if b.Hovered() {
-		b.Background(k.hover)
-	}
+	b := ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Padding(4, 10).Radius(controlRadius).Shrink(0)
+	controlInteraction(b, k, false)
 	b.Children(func() {
 		ui.Text(c, label).FontSize(13).FontWeight(600).TextColor(k.accent).SingleLine()
 	})
@@ -161,12 +179,8 @@ func textButton(c *ui.Context, k *colors, label string) ui.Element {
 // menuItem is a row of the session panel that does something: an icon
 // and its label, in color when it is not the text's.
 func menuItem(c *ui.Context, k *colors, glyph, label string, color ui.Color) ui.Element {
-	b := ui.ButtonBase(c).Label(label).Padding(7, 10).Radius(9).Gap(10).AlignItems(ui.Center)
-	if b.Pressed() {
-		b.Background(k.pressed)
-	} else if b.Hovered() {
-		b.Background(k.hover)
-	}
+	b := ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Padding(7, 10).Radius(controlRadius).Gap(10).AlignItems(ui.Center)
+	controlInteraction(b, k, false)
 	if color.A == 0 {
 		color = k.text
 	}

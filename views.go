@@ -33,7 +33,7 @@ import (
 func (a *app) view(c *ui.Context) {
 	c.SetTheme(appTheme(c))
 	a.svc = c.Services()
-	c.Root().Background(colorsOf(c).bgBottom)
+	c.Root().Background(colorsOf(c).background)
 	a.tabKeys(c)
 	switch t := a.active; {
 	case t == nil:
@@ -51,9 +51,9 @@ func (a *app) view(c *ui.Context) {
 	a.updateGrab()
 }
 
-// page lays out a view on the window's gradient, under the title bar.
+// page lays out a view on the window surface, under the title bar.
 func (a *app) page(c *ui.Context, k *colors, bar, body func()) {
-	ui.Column(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) { paintBackground(p, r, k) }).Children(func() {
+	ui.Column(c).Fill().Children(func() {
 		a.titleBar(c, k, bar)
 		body()
 	})
@@ -205,7 +205,7 @@ func (a *app) tabKeys(c *ui.Context) {
 func (a *app) rdpView(c *ui.Context, t *tab) {
 	k := colorsOf(c)
 	full := a.win != nil && a.win.IsFullScreen()
-	ui.Column(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) { paintBackground(p, r, k) }).Children(func() {
+	ui.Column(c).Fill().Children(func() {
 		if !full {
 			a.titleBar(c, k, func() {
 				a.tabsBar(c, k)
@@ -274,18 +274,17 @@ func (a *app) homeView(c *ui.Context) {
 		}
 	}, func() {
 		w, _ := c.Size()
-		inner := min(w, 1120) - 48
-		cols := min(max(int((inner+16)/(236+16)), 1), 4)
+		cols := computerGridColumns(w)
 		tracks := make([]ui.Track, cols)
 		for i := range tracks {
 			tracks[i] = ui.Fr(1)
 		}
 		ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
-			ui.Column(c).MaxWidth(1120).WidthPercent(100).AlignSelf(ui.Center).Padding(8, 24, 24, 24).Gap(16).Children(func() {
+			ui.Column(c).MaxWidth(1120).WidthPercent(100).AlignSelf(ui.Center).Padding(8, homeInset, homeInset, homeInset).Gap(homeGap).Children(func() {
 				if a.errText != "" {
 					banner(c, k, k.danger, a.errText, locales.Dismiss(), func() { a.errText = "" })
 				}
-				ui.Grid(c).ColumnTracks(tracks...).Gap(16).Children(func() {
+				ui.Grid(c).ColumnTracks(tracks...).Gap(homeGap).Children(func() {
 					for _, s := range a.cfg.Servers {
 						a.computerCard(c.Key(s), k, s)
 					}
@@ -298,21 +297,24 @@ func (a *app) homeView(c *ui.Context) {
 	a.editView(c, k)
 }
 
-// cardButton is a clickable card of the home grid, which rises under the
-// pointer.
+const (
+	homeInset = 16
+	homeGap   = 12
+)
+
+func computerGridColumns(width float32) int {
+	inner := min(width, 1120) - 2*homeInset
+	return min(max(int((inner+homeGap)/(216+homeGap)), 1), 4)
+}
+
+// cardButton is a focusable card of the home grid.
 func cardButton(c *ui.Context, k *colors, label string) ui.Element {
-	el := card(ui.ButtonBase(c).Label(label).Padding(10).Justify(ui.Start).AlignItems(ui.Stretch), k)
-	switch {
-	case el.Pressed():
-		el.Background(k.cardFocused).Border(1, k.cardBorderFocused).Shadow(0, 1, 2, 0, k.shadow)
-	case el.Hovered():
-		el.Background(k.cardFocused).Border(1, k.cardBorderFocused).Shadow(0, 8, 26, -2, k.shadowFocused)
-	}
-	return el.Transition(ui.ElementTransition{Colors: true, Duration: 160 * time.Millisecond})
+	return cardInteraction(card(ui.ButtonBase(c).Role(ui.RoleButton).Label(label).
+		Padding(10).Justify(ui.Start).AlignItems(ui.Stretch), k), k)
 }
 
 // thumbH is the height of a card's picture.
-const thumbH = 132
+const thumbH = 112
 
 func (a *app) computerCard(c *ui.Context, k *colors, server string) {
 	info := a.cfg.Computers[server]
@@ -369,8 +371,8 @@ func (a *app) addCard(c *ui.Context, k *colors) {
 	el := cardButton(c, k, locales.AddComputer())
 	el.Children(func() {
 		ui.Column(c).Grow(1).MinHeight(thumbH + 52).Gap(10).Center().Children(func() {
-			ui.Box(c).Size(44, 44).Radius(22).Center().Background(k.hover).Children(func() {
-				ui.Icon(c, icon("plus")).Size(22, 22).TextColor(k.textMuted)
+			ui.Box(c).Size(36, 36).Radius(controlRadius).Center().Background(k.hover).Children(func() {
+				ui.Icon(c, icon("plus")).Size(18, 18).TextColor(k.textMuted)
 			})
 			ui.Text(c, locales.AddComputer()).FontSize(13.5).FontWeight(600).TextColor(k.textMuted)
 		})
@@ -637,17 +639,12 @@ type settingsPage struct {
 // has a face of its own.
 func (a *app) sidebarItem(c *ui.Context, k *colors, p settingsPage, narrow bool) {
 	active := a.settingsPage == p.id
-	e := ui.Row(c.Key(p.id)).Height(34).Padding(0, 12, 0, 10).Gap(9).AlignItems(ui.Center).Radius(17).
+	e := ui.ButtonBase(c.Key(p.id)).Height(34).Padding(0, 12, 0, 10).Gap(9).Justify(ui.Start).AlignItems(ui.Center).Radius(controlRadius).
 		Cursor(ui.CursorPointer).Role(ui.RoleTab).Selected(active).Label(p.title)
 	if narrow {
 		e.Padding(0).Justify(ui.Center).Tooltip(p.title)
 	}
-	if active {
-		e.Background(k.tabActive).Shadow(0, 1, 2, 0, k.shadow).Shadow(0, 2, 8, 0, k.shadow)
-	} else if e.Hovered() {
-		e.Background(k.hover)
-	}
-	e.Transition(ui.ElementTransition{Colors: true, Duration: 160 * time.Millisecond})
+	controlInteraction(e, k, active)
 	if e.Clicked() {
 		a.settingsPage = p.id
 	}
@@ -666,7 +663,14 @@ func (a *app) sidebarItem(c *ui.Context, k *colors, p settingsPage, narrow bool)
 // settingRow lays out a setting on a card: its label and hint, and its
 // control beside them.
 func settingRow(c *ui.Context, k *colors, label, hint string, control func()) {
-	card(ui.Row(c).Gap(16).AlignItems(ui.Center).Padding(11, 14), k).Children(func() {
+	w, _ := c.Size()
+	var row ui.Element
+	if w < 520 {
+		row = ui.Column(c).Gap(8).AlignItems(ui.Stretch)
+	} else {
+		row = ui.Row(c).Gap(16).AlignItems(ui.Center)
+	}
+	card(row.Padding(11, 14), k).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 			ui.Text(c, label).FontSize(13.5).FontWeight(600).TextColor(k.text).Wrap()
 			if hint != "" {
@@ -688,14 +692,8 @@ func settingNote(c *ui.Context, k *colors, text string) {
 // settingAction is a setting that acts rather than holds a value: a card
 // that runs act when clicked, its icon and label, then a chevron.
 func settingAction(c *ui.Context, k *colors, glyph, label string, act func()) {
-	row := card(ui.ButtonBase(c).Label(label).Cursor(ui.CursorPointer).Padding(11, 14).Gap(12).AlignItems(ui.Center), k)
-	switch {
-	case row.Pressed():
-		row.Background(k.cardFocused).Border(1, k.cardBorderFocused).Shadow(0, 1, 2, 0, k.shadow)
-	case row.Hovered():
-		row.Background(k.cardFocused).Border(1, k.cardBorderFocused).Shadow(0, 8, 26, -2, k.shadowFocused)
-	}
-	row.Transition(ui.ElementTransition{Colors: true, Duration: 160 * time.Millisecond})
+	row := cardInteraction(card(ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Cursor(ui.CursorPointer).
+		Padding(10, 12).Gap(10).AlignItems(ui.Center), k), k)
 	row.Children(func() {
 		ui.Icon(c, icon(glyph)).Size(16, 16).TextColor(k.iconMuted).Shrink(0)
 		ui.Text(c, label).FontSize(13.5).FontWeight(600).TextColor(k.text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")

@@ -36,6 +36,20 @@ func (c *Client) readMsg() error {
 		return c.rd.err
 	}
 	c.log.Debug("rfb: message", "type", t)
+	if c.opt.ManagedView {
+		switch t {
+		case msgFramebufferUpdate:
+			if !c.managedFramePending.Load() {
+				return errors.New("rfb: unrequested managed framebuffer update")
+			}
+			return c.readFramebufferUpdate()
+		case msgBell:
+			return nil
+		default:
+			return errors.New("rfb: unsupported message in managed view")
+		}
+	}
+
 	if c.appleARD {
 		switch t {
 		case 0x04, 0x07, 0x14, 0x1f, 0x20, 0x22, 0x23, 0x51:
@@ -82,7 +96,7 @@ func (c *Client) readFramebufferUpdate() error {
 	c.updateStart()
 	c.mu.Lock()
 	var err error
-	ask := !c.cuEnabled
+	ask := !c.cuEnabled && !c.opt.ManagedView
 	w, h := c.requestSizeLocked() // see hp.go
 	if c.hpHolding() {
 		// The picture is the media stream's; RFB only brings cursors and
@@ -104,6 +118,10 @@ func (c *Client) readFramebufferUpdate() error {
 		return err
 	}
 
+	if c.opt.ManagedView && (n == 0 || n > 1024) {
+		return errors.New("rfb: invalid managed rectangle count")
+	}
+	pixels := 0
 	for ; n > 0; n-- {
 		x, y := int(c.rd.u16()), int(c.rd.u16())
 		w, h := int(c.rd.u16()), int(c.rd.u16())
@@ -113,6 +131,16 @@ func (c *Client) readFramebufferUpdate() error {
 		}
 		c.log.Debug("rfb: rect", "x", x, "y", y, "w", w, "h", h, "encoding", enc)
 		rect := image.Rect(x, y, x+w, y+h)
+		if c.opt.ManagedView {
+			if enc != EncodingRaw || w < 1 || h < 1 || !rect.In(c.fb.Rect) {
+				return errors.New("rfb: unsupported managed framebuffer rectangle")
+			}
+			pixels += w * h
+			if pixels > 2*c.fb.Rect.Dx()*c.fb.Rect.Dy() {
+				return errors.New("rfb: managed framebuffer update exceeds limit")
+			}
+		}
+
 		start := c.inPos()
 		last, err := c.readRect(rect, enc)
 		if enc >= 0 {
@@ -162,6 +190,9 @@ func (c *Client) updateEnd() error {
 		if err := c.write(qemuAudioEnable(true)); err != nil {
 			return err
 		}
+	}
+	if c.opt.ManagedView {
+		c.managedFramePending.Store(false)
 	}
 	c.h.UpdateDone()
 	if err := c.displayStep(); err != nil {

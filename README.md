@@ -78,7 +78,7 @@ platforms; RDP is Windows-only.
   or `MyVNC.exe rdp://host[:port]`. An address may be typed with a scheme:
   `vnc://` and `ard://` are VNC/RFB (a Mac's ARD dialect is detected either
   way), `rdp://` is Remote Desktop; anything else is refused before dialling.
-  TigerVNC-compatible options and `.tigervnc` files are supported
+  TigerVNC-compatible command-line options are supported
   (`MyVNC.exe -h` for the list).
 - In-session: overlay panel for stats and video settings;
   Ctrl+Alt+Del sends Ctrl+Alt+Del; right-click a home card to remove it.

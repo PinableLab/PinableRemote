@@ -50,7 +50,7 @@ Status as of v0.0.26 (2026-10-23). Open work is tracked in GitHub issues.
     wire format verified against ScreenSharing 776.27 in
     open-screen-sharing. Fallback to paced button clicks for everything
     else; fast repeating strokes accelerate up to three times;
-    `WheelScrollLines` (settings, Input; command line and .tigervnc
+    `WheelScrollLines` (settings, Input; command line
     too) scales the fallback and the lines a notch carries, 0 follows
     the system.
 - v0.0.1: RFB 3.3 / 3.7 / 3.8 and Apple RFB 3.889; None, VncAuth, Plain,
@@ -70,7 +70,7 @@ Status as of v0.0.26 (2026-10-23). Open work is tracked in GitHub issues.
     button emulation (#12).
   - Scaling modes, Ctrl+Alt+Del, dot cursor, auto-reconnect, display choice
     (#13).
-  - TigerVNC command line options and `.tigervnc` files.
+  - TigerVNC-compatible command line options.
   - MVS verified against the C++ decoder; decoder benchmarks (#7, #14).
   - Test suite aligned with TigerVNC `tests/` (#17).
   - Windows CI with installer test and tagged releases (#15).

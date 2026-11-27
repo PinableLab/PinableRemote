@@ -691,21 +691,6 @@ func settingNote(c *ui.Context, k *colors, text string) {
 	})
 }
 
-// settingAction is a setting that acts rather than holds a value: a card
-// that runs act when clicked, its icon and label, then a chevron.
-func settingAction(c *ui.Context, k *colors, glyph, label string, act func()) {
-	row := cardInteraction(card(ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Cursor(ui.CursorPointer).
-		Padding(10, 12).Gap(10).AlignItems(ui.Center), k), k)
-	row.Children(func() {
-		ui.Icon(c, icon(glyph)).Size(16, 16).TextColor(k.iconMuted).Shrink(0)
-		ui.Text(c, label).FontSize(13.5).FontWeight(600).TextColor(k.text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
-		ui.Icon(c, icon("chevron-right")).Size(15, 15).TextColor(k.iconMuted).Shrink(0)
-	})
-	if row.Clicked() {
-		act()
-	}
-}
-
 // settingStack lays out a setting whose control is too wide to sit beside
 // its label, as a slider or a segmented control, below it.
 func settingStack(c *ui.Context, k *colors, label string, control func()) {
@@ -867,22 +852,7 @@ func (a *app) settingsPages() []settingsPage {
 		}
 	}}
 	updatesPage := settingsPage{"updates", "refresh-cw", locales.Updates(), a.updatesView}
-	tigerPage := settingsPage{"tigervnc", "file-input", locales.TigerVNC(), func(c *ui.Context, k *colors) {
-		settingNote(c, k, locales.TigerHelp())
-		if a.importFile != nil {
-			settingAction(c, k, "file-input", locales.ImportTiger(), func() {
-				a.closeSettings()
-				a.importFile()
-			})
-		}
-		if a.exportFile != nil {
-			settingAction(c, k, "file-output", locales.ExportTiger(), func() {
-				a.closeSettings()
-				a.exportFile()
-			})
-		}
-	}}
-	return []settingsPage{interfacePage, videoPage, clipboardPage, inputPage, connectionPage, credentialsPage, windowPage, updatesPage, tigerPage}
+	return []settingsPage{interfacePage, videoPage, clipboardPage, inputPage, connectionPage, credentialsPage, windowPage, updatesPage}
 }
 
 // credentialsView is the settings page of the accounts kept for servers:

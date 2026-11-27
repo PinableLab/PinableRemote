@@ -5,14 +5,12 @@
 package params
 
 import (
-	"io"
-
 	"github.com/si-mods/MyVNC/rfb"
 	"github.com/si-mods/MyVNC/viewer/keymap"
 )
 
 // SecurityTypeNames are TigerVNC's SecurityTypes values. TLSNone, TLSVnc
-// and TLSPlain are accepted so TigerVNC files load, but rfb cannot offer
+// and TLSPlain are accepted for command-line compatibility, but rfb cannot offer
 // them (no anonymous TLS in crypto/tls).
 var SecurityTypeNames = []string{
 	"None", "VncAuth", "Plain",
@@ -51,7 +49,6 @@ type Viewer struct {
 	VideoDecoding       *Enum // MyVNC's own
 	WheelScrollLines    *Int  // MyVNC's own
 
-	saved []Param
 }
 
 // NewViewer makes the parameter set with TigerVNC's defaults.
@@ -87,26 +84,16 @@ func NewViewer() *Viewer {
 			"are a combination of Ctrl, Shift, Alt, and Super)",
 			[]string{"Ctrl", "Shift", "Alt", "Super", "Win", "Option", "Cmd"}, []string{"Ctrl", "Alt"}),
 	}
-	// TigerVNC's parameterArray order, then MyVNC's own; RemoteResize is
-	// command line only.
-	v.saved = []Param{
+	// Preserve the CLI help ordering.
+	v.Add(
 		v.SecurityTypes, v.Shared, v.AutoSelect, v.PreferredEncoding, v.CustomCompressLevel,
 		v.CompressLevel, v.NoJPEG, v.QualityLevel, v.FullScreen, v.ViewOnly,
 		v.EmulateMiddleButton, v.AcceptClipboard, v.SendClipboard, v.ShortcutModifiers,
 		v.VideoDecoding, v.WheelScrollLines,
-	}
-	v.Add(v.saved...)
+	)
 	v.Add(v.RemoteResize)
 	return v
 }
-
-// Load reads a .tigervnc file into the saved parameters.
-func (v *Viewer) Load(r io.Reader) (server string, warnings []error, err error) {
-	return Load(r, v.saved)
-}
-
-// Save writes the saved parameters that are not at their defaults.
-func (v *Viewer) Save(w io.Writer, server string) error { return Save(w, server, v.saved) }
 
 // SecTypes maps SecurityTypes to rfb.Options.SecurityTypes.
 func (v *Viewer) SecTypes() []uint32 {

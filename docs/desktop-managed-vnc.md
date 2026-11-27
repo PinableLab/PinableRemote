@@ -1,7 +1,7 @@
 # Desktop-managed Mac Screen Sharing: restricted VNC adapter
 
-This change supplies an internal Go adapter, not a command, listener, MCP
-tool, or enabled desktop capability. The ordinary interactive VNC/ARD
+This change supplies an internal Go adapter and a private macOS child entry.
+It is not a listener, MCP tool, or enabled Desktop product capability. The ordinary interactive VNC/ARD
 viewer retains its behavior. Desktop must authorize the target and
 per-task lease locally before opening a private, dedicated child and
 close the child on revocation. An agent must not receive this pipe,
@@ -37,28 +37,25 @@ Mac settings are still subject to native acceptance.
 
 ## Private integration
 
-The future fixed VNC child entry point (not agent-selected) calls:
+Desktop may start the verified macOS build with the fixed internal argument
+`--internal-desktop-vnc-v1` only after the user approves this task's request.
+The child requires anonymous stdin/stdout and a separate inherited anonymous
+pipe (descriptor 3). The latter carries one bounded JSON object with
+`host`, `port`, `server_name`, `spki_sha256` (64 hex characters) and
+`require_screen_privacy`. Desktop closes this descriptor after writing.
+A missing or invalid bootstrap, a request for privacy that cannot be
+established, or an unsupported operating system does not start the viewer
+or dial the target. The existing system screen-privacy preference must
+be included in the caller's decision and cannot be relaxed for a task.
 
-```go
-managedvnc.Serve(ctx, inheritedIn, inheritedOut, managedvnc.Identity{
-    Host: enrolledRelayAddress,
-    Port: enrolledRelayPort,
-    ServerName: enrolledTLSName,
-    SPKISHA256: enrolledLeafSPKIHash, // [32]byte, decoded from trusted records
-})
-```
-
-The parent reads those fields from approved device configuration and passes
-them privately to the fixed child (for example through a separate inherited
-bootstrap pipe); none belong in shell arguments,
-agent-visible settings, logs or files. Reuses the [version 1 newline-JSON
-private wire](desktop-managed-rdp.md): exactly one `open` may provide a
-binding. Its `host` and `port` must exactly match the approved relay;
-`user` is the literal `vnc` and `password` is the enrolled VNC password
-(inherited pipe only). Status becomes authenticated only after both TLS
-identity and VNC authentication succeed. Capture and input require a
-live session; input further requires explicit authorization and a fresh
-nonreusable frame ID.
+Stdin/stdout reuse the [version 1 private wire](desktop-managed-rdp.md):
+exactly one `open` binding is accepted, and its host and port must match the
+enrolled identity. The VNC password is confined to this binding, never the
+command line, environment, bootstrap, audit, or model context. Status
+becomes authenticated only after TLS identity and VNC authentication.
+Input additionally requires a separate, explicit grant and a fresh frame.
+This is not a real Mac acceptance claim; do not expose the product entry
+until the approved Mac, trusted relay and installed binary pass testing.
 
 A screenshot asks for a full raw RFB framebuffer from that authenticated
 session. Partial frames, unsolicited updates and resize are rejected; the

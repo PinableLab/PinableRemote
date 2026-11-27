@@ -1703,6 +1703,9 @@ func takeShot(a *app, win *mygo.Window, path string, waitForSession bool) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == managedDesktopSwitch {
+		os.Exit(runManagedDesktopVNC(os.Args[1:]))
+	}
 	// Reserve the removed switch: stale external integrations must not
 	// launch the GUI, read credentials or open a connection.
 	if len(os.Args) > 1 && os.Args[1] == "--mcp" {

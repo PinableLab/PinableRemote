@@ -1,3 +1,12 @@
+# Pinable shared local files
+.codegraph/
+.DS_Store
+Thumbs.db
+[Dd]esktop.ini
+.env
+.env.local
+.env.*.local
+
 /build/
 /.mygo/
 mygo_windows_*.syso

@@ -131,6 +131,8 @@ type Options struct {
 	// ARD server: the picture comes as HEVC/H.264 over SRTP; see
 	// HighPerformance. nil is Standard mode.
 	HighPerformance *HighPerformance
+	// RequireScreenPrivacy accepts only an Apple server that confirms curtain state.
+	RequireScreenPrivacy bool
 	// AutoSelect is TigerVNC's AutoSelect: Tight is preferred, and the
 	// JPEG quality level (8 or 6) and the pixel format (full or 256
 	// colours) follow the measured throughput, re-sent as it changes.
@@ -223,44 +225,45 @@ type Client struct {
 	secure              bool   // TLS or RSA-AES protects the stream
 
 	// Read side; touched only by the handshake and Run.
-	rd           reader
-	major, minor int
-	appleARD     bool
-	ardFlags     uint32
-	ardKey       *[16]byte
-	ardPending   *[2][16]byte
-	ardCommands  [16]byte          // client messages the server accepts, MSB first
-	ardLayout    bool              // a display layout (1101/1105) has arrived
-	rawTap       io.Writer         // test-only: tee of the decrypted ARD stream (#43)
-	fcServer     func(body []byte) // test/impl hook: an inbound 0x22 file-copy record body (#43)
-	fcMu         sync.Mutex        // serialises file copy; sessionID is fixed (#43)
-	fcIn         fileCopySink      // active transfer consuming inbound 0x22 records (#43)
-	fcInMu       sync.Mutex        // guards fcIn; the read side must not take fcMu
-	hp           *hpState
-	name         string
-	pf           pixel.Format
-	fb           *image.RGBA
-	cursorCache  map[uint32]ardCursor
-	encMu        sync.Mutex
-	encStats     map[int32]*encodingStat
-	haveCreds    bool
-	user, pass   string
-	updates      int  // FramebufferUpdates finished
-	serverCU     bool // server sent EndOfContinuousUpdates
-	fenceSeen    bool
-	serverAudio  bool
-	audioAsked   bool
-	dm           decodeManager
-	decoded      []image.Rectangle // decoded or queued, not yet passed to Updated
-	in           *countConn
-	fullPF       pixel.Format  // the format asked for at first
-	nextPF       *pixel.Format // to send at the next update (TigerVNC's formatChange)
-	pendingPF    *pixel.Format // sent, not yet in use
-	encChange    bool          // SetEncodings to send at the next update
-	updStart     time.Time
-	updPos       int64
-	pingAt       time.Time // a ping fence is out
-	lastPing     time.Time
+	rd                                                             reader
+	major, minor                                                   int
+	appleARD                                                       bool
+	privacyObserved, privacyAvailable, privacyHidden, privacyReady bool
+	ardFlags                                                       uint32
+	ardKey                                                         *[16]byte
+	ardPending                                                     *[2][16]byte
+	ardCommands                                                    [16]byte          // client messages the server accepts, MSB first
+	ardLayout                                                      bool              // a display layout (1101/1105) has arrived
+	rawTap                                                         io.Writer         // test-only: tee of the decrypted ARD stream (#43)
+	fcServer                                                       func(body []byte) // test/impl hook: an inbound 0x22 file-copy record body (#43)
+	fcMu                                                           sync.Mutex        // serialises file copy; sessionID is fixed (#43)
+	fcIn                                                           fileCopySink      // active transfer consuming inbound 0x22 records (#43)
+	fcInMu                                                         sync.Mutex        // guards fcIn; the read side must not take fcMu
+	hp                                                             *hpState
+	name                                                           string
+	pf                                                             pixel.Format
+	fb                                                             *image.RGBA
+	cursorCache                                                    map[uint32]ardCursor
+	encMu                                                          sync.Mutex
+	encStats                                                       map[int32]*encodingStat
+	haveCreds                                                      bool
+	user, pass                                                     string
+	updates                                                        int  // FramebufferUpdates finished
+	serverCU                                                       bool // server sent EndOfContinuousUpdates
+	fenceSeen                                                      bool
+	serverAudio                                                    bool
+	audioAsked                                                     bool
+	dm                                                             decodeManager
+	decoded                                                        []image.Rectangle // decoded or queued, not yet passed to Updated
+	in                                                             *countConn
+	fullPF                                                         pixel.Format  // the format asked for at first
+	nextPF                                                         *pixel.Format // to send at the next update (TigerVNC's formatChange)
+	pendingPF                                                      *pixel.Format // sent, not yet in use
+	encChange                                                      bool          // SetEncodings to send at the next update
+	updStart                                                       time.Time
+	updPos                                                         int64
+	pingAt                                                         time.Time // a ping fence is out
+	lastPing                                                       time.Time
 
 	mu          sync.Mutex // serialises writes and guards the fields below
 	out         io.Writer  // the send queue's after the handshake
@@ -311,6 +314,9 @@ func Dial(ctx context.Context, addr string, opt Options, h Handler) (*Client, er
 // NewClient performs the handshake over an established connection.
 // serverName is used for TLS verification. conn is closed on error.
 func NewClient(ctx context.Context, conn net.Conn, serverName string, opt Options, h Handler) (*Client, error) {
+	if opt.RequireScreenPrivacy {
+		opt.HighPerformance = nil
+	}
 	if opt.ManagedView {
 		tunnel, ok := conn.(*tls.Conn)
 		if !ok || opt.Decoders[EncodingRaw] == nil {
@@ -351,16 +357,22 @@ func NewClient(ctx context.Context, conn net.Conn, serverName string, opt Option
 		c.opt.Password = nil
 		c.user, c.pass, c.haveCreds = "", "", false
 	}
+	if err == nil {
+		c.sq = newSendQueue()
+		go c.sq.run(c.out)
+		if c.opt.RequireScreenPrivacy {
+			err = c.confirmPrivacy(ctx)
+		}
+	}
 	if !stop() {
 		err = ctx.Err()
 	}
 	if err != nil {
 		c.log.Info("rfb: handshake failed", "err", err)
-		conn.Close()
+		c.Close()
+		c.dm.shutdown()
 		return nil, err
 	}
-	c.sq = newSendQueue()
-	go c.sq.run(c.out)
 	return c, nil
 }
 
@@ -416,6 +428,9 @@ func (c *Client) Run() error {
 	c.h.Resize(b.Dx(), b.Dy())
 	for {
 		if err := c.readMsg(); err != nil {
+			if errors.Is(err, ErrPrivacyLost) {
+				_ = c.conn.Close() // stop queued input before returning the privacy failure
+			}
 			if c.closed.Load() {
 				c.log.Info("rfb: disconnected", "reason", "closed by client")
 				return nil
@@ -445,6 +460,9 @@ func (c *Client) handshake(ctx context.Context) error {
 	if c.opt.ManagedView && (major != 3 || minor < 8) {
 		return errors.New("rfb: managed view requires RFB 3.8 or newer")
 	}
+	if c.opt.RequireScreenPrivacy && !c.appleARD {
+		return ErrPrivacyUnsupported
+	}
 	c.log.Info("rfb: server version", "version", fmt.Sprintf("%d.%d", major, minor), "ard", c.appleARD)
 	switch {
 	case c.before(3, 3):
@@ -464,6 +482,9 @@ func (c *Client) handshake(ctx context.Context) error {
 
 	if err := c.negotiateSecurity(ctx); err != nil {
 		return err
+	}
+	if c.opt.RequireScreenPrivacy && c.secType == SecTypeNone {
+		return ErrPrivacyUnsupported
 	}
 
 	// ClientInit
@@ -563,7 +584,7 @@ func (c *Client) sessionSelect() error {
 func (c *Client) finishInit() error {
 	var msgs [][]byte
 	if c.appleARD {
-		msgs = append(msgs, ardViewerInfo(), ardSetMode(1), ardSetDisplay(), ardAutoPasteboard(true))
+		msgs = append(msgs, ardViewerInfo(), ardSetMode(1), ardSetDisplay(), ardAutoPasteboard(!c.opt.RequireScreenPrivacy))
 		if c.ardKey != nil {
 			msgs = append(msgs, ardSetEncryption(false))
 		}

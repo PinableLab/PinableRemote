@@ -27,7 +27,6 @@ import (
 	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
-	"github.com/si-mods/MyVNC/internal/mcpserver"
 	"github.com/si-mods/MyVNC/internal/mf"
 	"github.com/si-mods/MyVNC/internal/win32"
 	"github.com/si-mods/MyVNC/locales"
@@ -67,6 +66,7 @@ type app struct {
 	editForm           rdpForm
 	editErr            string
 	settingsOpen       bool
+	aboutOpen          bool
 	settingsPage       string // the settings page shown
 	appearance         string // active UI mode; Desktop can override it for this process
 	desktopManaged     string
@@ -266,7 +266,7 @@ func (a *app) scaling() string {
 // Screen Sharing's dynamic resolution; a Mac gets a virtual display at the
 // monitor's density.
 func (a *app) followWindow(t *tab, p *ui.Painter, r ui.Rect) {
-	if !a.cfg.DynamicResolution || t.dynRefused || a.cfg.ViewOnly || a.cfg.Orientation != 0 {
+	if !a.cfg.DynamicResolution || (t.sess != nil && t.sess.ScreenPrivacyRequired()) || t.dynRefused || a.cfg.ViewOnly || a.cfg.Orientation != 0 {
 		return
 	}
 	t.dyn.Want(viewer.DesktopSize(r.W, r.H, p.Scale()), p.Now(), t.dynUrgent)
@@ -789,6 +789,9 @@ func errorText(err error) string {
 		{errUnencryptedCanceled, locales.ErrUnencryptedCanceled},
 		{errHostKeyRejected, locales.ErrHostKeyRejected},
 		{errCertRejected, locales.ErrCertRejected},
+		{rfb.ErrPrivacyUnsupported, locales.ErrPrivacyUnsupported},
+		{rfb.ErrPrivacyUnconfirmed, locales.ErrPrivacyUnconfirmed},
+		{rfb.ErrPrivacyLost, locales.ErrPrivacyLost},
 	} {
 		if errors.Is(err, e.err) {
 			return e.say()
@@ -885,7 +888,7 @@ func (a *app) connectTo(t *tab, server string, again bool) {
 		useStore := cfg.Remember
 		var secType atomic.Uint32
 		opt := rfb.Options{
-			Username:      user,
+			Username: user, RequireScreenPrivacy: cfg.RequireScreenPrivacy,
 			Shared:        cfg.Shared,
 			Encodings:     cfg.EncodingList(),
 			AutoSelect:    cfg.AutoSelect(),
@@ -1255,7 +1258,7 @@ func (a *app) connected(t *tab, s *viewer.Session, server, addr, user, pass stri
 		if errors.As(err, &ae) {
 			t.pass = "" // Retry asks again
 		}
-		if t.rc.active && ae == nil {
+		if t.rc.active && ae == nil && !errors.Is(err, rfb.ErrPrivacyUnsupported) && !errors.Is(err, rfb.ErrPrivacyUnconfirmed) {
 			a.scheduleReconnect(t)
 		} else {
 			t.cancelReconnect() // the tab shows the error; its transfers wait for Retry
@@ -1518,7 +1521,7 @@ func (a *app) disconnected(t *tab, s *viewer.Session, err error) {
 		a.fullScreen(false)
 	}
 	t.errText = locales.Disconnected(errorText(err))
-	if a.cfg.Reconnect {
+	if a.cfg.Reconnect && !errors.Is(err, rfb.ErrPrivacyLost) {
 		t.rc = reconnect{server: server, gen: t.rc.gen, limit30: s.Stats().MediaFrameRate30}
 		a.scheduleReconnect(t)
 	}
@@ -1718,12 +1721,12 @@ func takeShot(a *app, win *mygo.Window, path string, waitForSession bool) {
 }
 
 func main() {
-	// --mcp, first: an MCP server on stdio. Nothing of the window, the
-	// settings or the updater is touched.
+	// Reserve the removed switch: stale external integrations must not
+	// launch the GUI, read credentials or open a connection.
 	if len(os.Args) > 1 && os.Args[1] == "--mcp" {
 		attachConsole()
-		os.Exit(mcpserver.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr,
-			mcpserver.ConfigGate(func() (string, error) { return mygo.App.Path(mygo.PathUserData) })))
+		fmt.Fprintln(os.Stderr, "PinableRemote: the standalone Agent (MCP) mode has been removed.")
+		os.Exit(2)
 	}
 	perf, args, perfErr := perfArgs(os.Args[1:])
 	if perfErr != nil {
@@ -1753,11 +1756,11 @@ func main() {
 		fmt.Print(usage())
 		return
 	}
-	a.desktopManaged = os.Getenv(desktopManagedEnv)
+	a.desktopManaged = desktopManaged(os.Getenv(desktopManagedEnv), os.Getenv(commonDesktopManagedEnv))
 	a.appearance = desktopAppearance(a.cfg.Theme, a.desktopManaged, os.Getenv(desktopThemeEnv))
 	setThemeSource(a.appearance)
 	mygo.App.SetLocale(a.cfg.Language) // the setting is the config's
-	if useStandaloneUpdater(a.desktopManaged, perf != nil) {
+	if useStandaloneUpdater(a.desktopManaged, perf != nil) && hasOwnedSignedUpdates(packagedUpdateConfig) {
 		mygo.Use(native.New(updater.Options{Language: a.cfg.Language}))
 		a.upds = &updateHooks{
 			check:   updater.CheckForUpdates,

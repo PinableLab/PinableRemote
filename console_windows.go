@@ -7,11 +7,9 @@ import (
 	"syscall"
 )
 
-// attachConsole gives "MyVNC --mcp" its standard streams. The exe has no
-// console (-H=windowsgui): started by an MCP client with pipes, its standard
-// handles are valid and nothing is needed; started from a terminal they are
-// not, and the parent's console is attached so that --help prints. No new
-// console window is made.
+// attachConsole makes early command-line errors visible when the GUI
+// executable is run in a terminal. It preserves inherited streams and
+// never creates a console window.
 func attachConsole() {
 	invalid := func(id int) bool {
 		h, err := syscall.GetStdHandle(id)

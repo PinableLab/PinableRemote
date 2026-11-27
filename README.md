@@ -80,8 +80,6 @@ platforms; RDP is Windows-only.
   way), `rdp://` is Remote Desktop; anything else is refused before dialling.
   TigerVNC-compatible options and `.tigervnc` files are supported
   (`MyVNC.exe -h` for the list).
-- AI agents: `MyVNC.exe --mcp` runs an MCP server on stdio, with no window
-  ([docs/MCP.md](docs/MCP.md)); off until you turn it on in Settings.
 - In-session: overlay panel for stats and video settings;
   Ctrl+Alt+Del sends Ctrl+Alt+Del; right-click a home card to remove it.
 - Tabs: each computer opens in its own tab of the title bar; `+` shows the
@@ -115,7 +113,7 @@ go tool mygo build   # build exe + installer into build/ (macOS: MyVNC.app)
 
 | Doc | Contents |
 |---|---|
-| [docs/MCP.md](docs/MCP.md) | `MyVNC.exe --mcp`: MCP server for AI agents |
+| [Privacy screen](docs/privacy-screen.md) | Local display privacy policy and acceptance checklist |
 | [docs/rdp.md](docs/rdp.md) | RDP sessions: usage, credentials, limits |
 | [docs/tabs.md](docs/tabs.md) | Tabs: several sessions in one window |
 | [docs/bandwidth.md](docs/bandwidth.md) | Link measurement, quality policy, server-side requirements |

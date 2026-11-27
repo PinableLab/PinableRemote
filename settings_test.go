@@ -9,34 +9,19 @@ import (
 	"github.com/si-mods/MyVNC/viewer"
 )
 
-// The Agent (MCP) page's switch turns MCP on and writes it to config.json.
-func TestSettingsMCPSwitch(t *testing.T) {
+func TestLegacyAgentSettingsRemoved(t *testing.T) {
 	a := newTestApp(t)
-	if a.cfg.MCPEnabled {
-		t.Fatal("MCP starts on")
+	if err := a.tt.Click("Settings"); err != nil {
+		t.Fatal(err)
 	}
-	for _, step := range []string{"Settings", "Agent (MCP)"} {
-		if err := a.tt.Click(step); err != nil {
-			t.Fatal(err)
+	a.tt.Frame()
+	for _, page := range a.settingsPages() {
+		if page.id == "agent" {
+			t.Fatal("legacy Agent settings page remains")
 		}
-		a.tt.Frame()
 	}
-	if !strings.Contains(strings.Join(a.tt.Texts(), "|"), "Off by default") {
-		t.Errorf("no warning text; texts %q", a.tt.Texts())
-	}
-	path := filepath.Join(a.dir, "config.json")
-	// The title is the row's left cell; the switch sits right of it.
-	r, ok := a.tt.Find("Allow agents to control computers (MCP)")
-	if !ok {
-		t.Fatalf("no switch row; texts %q", a.tt.Texts())
-	}
-	for _, want := range []bool{true, false} {
-		a.tt.ClickAt(r.X+r.W+20, r.Y+r.H/2)
-		a.tt.Frame()
-		saved, err := viewer.LoadConfig(path)
-		if a.cfg.MCPEnabled != want || saved.MCPEnabled != want || err != nil {
-			t.Fatalf("after the click: memory %v, disk %v (%v), want %v", a.cfg.MCPEnabled, saved.MCPEnabled, err, want)
-		}
+	if a.tt.HasText("Agent (MCP)") {
+		t.Fatal("legacy Agent page visible")
 	}
 }
 
@@ -131,5 +116,25 @@ func TestSettingsApplyLive(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(a.tt.Texts(), "|"), "Add computer") {
 		t.Errorf("no home view; texts %q", a.tt.Texts())
+	}
+}
+
+func TestSettingsScreenPrivacySwitch(t *testing.T) {
+	a := newTestApp(t)
+	for _, step := range []string{"Settings", "Connection"} {
+		if err := a.tt.Click(step); err != nil {
+			t.Fatal(err)
+		}
+		a.tt.Frame()
+	}
+	r, ok := a.tt.Find("Require privacy screen")
+	if !ok || a.cfg.RequireScreenPrivacy {
+		t.Fatalf("missing opt-in switch or enabled by default: %v", a.tt.Texts())
+	}
+	a.tt.ClickAt(r.X+r.W+20, r.Y+r.H/2)
+	a.tt.Frame()
+	saved, err := viewer.LoadConfig(filepath.Join(a.dir, "config.json"))
+	if err != nil || !saved.RequireScreenPrivacy || !a.cfg.RequireScreenPrivacy {
+		t.Fatalf("privacy preference not saved: %v, %v / %v", a.cfg.RequireScreenPrivacy, saved.RequireScreenPrivacy, err)
 	}
 }

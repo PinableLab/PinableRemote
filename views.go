@@ -579,6 +579,7 @@ func (a *app) syncSettings() {
 func (a *app) closeSettings() {
 	a.syncSettings()
 	a.settingsOpen = false
+	a.aboutOpen = false
 }
 
 // settingsView is the settings page, in place of the home: a sidebar of
@@ -624,6 +625,7 @@ func (a *app) settingsView(c *ui.Context) {
 			})
 		})
 	})
+	a.aboutDialog(c.Key("pinable-about"))
 	// The controls set their values as the frame builds them: they hold
 	// at once, without a button to commit them.
 	a.syncSettings()
@@ -843,6 +845,9 @@ func (a *app) settingsPages() []settingsPage {
 		settingSwitch(c, k, locales.Reconnect(), "", &a.cfg.Reconnect)
 		settingSwitch(c, k, locales.HighPerformance(), "", &a.cfg.HighPerformance)
 		settingSwitch(c, k, locales.SecureOnly(), "", &a.cfg.SecureOnly)
+		if settingSwitch(c, k, locales.ScreenPrivacy(), locales.ScreenPrivacyHint(), &a.cfg.RequireScreenPrivacy) {
+			a.saveConfig()
+		}
 	}}
 	credentialsPage := settingsPage{"credentials", "lock", locales.Credentials(), a.credentialsView}
 	windowPage := settingsPage{"window", "app-window", locales.Window(), func(c *ui.Context, k *colors) {
@@ -861,11 +866,6 @@ func (a *app) settingsPages() []settingsPage {
 			}
 		}
 	}}
-	agentPage := settingsPage{"agent", "bot", locales.AgentMCP(), func(c *ui.Context, k *colors) {
-		if settingSwitch(c, k, locales.AllowMCP(), locales.McpHelp(), &a.cfg.MCPEnabled) {
-			a.saveConfig()
-		}
-	}}
 	updatesPage := settingsPage{"updates", "refresh-cw", locales.Updates(), a.updatesView}
 	tigerPage := settingsPage{"tigervnc", "file-input", locales.TigerVNC(), func(c *ui.Context, k *colors) {
 		settingNote(c, k, locales.TigerHelp())
@@ -882,7 +882,7 @@ func (a *app) settingsPages() []settingsPage {
 			})
 		}
 	}}
-	return []settingsPage{interfacePage, videoPage, clipboardPage, inputPage, connectionPage, credentialsPage, windowPage, agentPage, updatesPage, tigerPage}
+	return []settingsPage{interfacePage, videoPage, clipboardPage, inputPage, connectionPage, credentialsPage, windowPage, updatesPage, tigerPage}
 }
 
 // credentialsView is the settings page of the accounts kept for servers:

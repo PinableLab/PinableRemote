@@ -67,8 +67,7 @@ RDP 仅限 Windows。
 - 命令行:`MyVNC.exe [host[:port]]`、`MyVNC.exe ard://host[:port]` 或
   `MyVNC.exe rdp://host[:port]`。地址可带协议前缀:`vnc://` 与 `ard://`
   都是 VNC/RFB(Mac 的 ARD 方言无论带不带上缀都会自动识别),`rdp://`
-  走远程桌面;其它前缀在连接前就被拒绝。兼容 TigerVNC 命令行选项与
-  `.tigervnc` 配置文件(完整列表见 `MyVNC.exe -h`)。
+  走远程桌面;其它前缀在连接前就被拒绝。兼容 TigerVNC 命令行选项(完整列表见 `MyVNC.exe -h`)。
 - 会话内:悬浮面板查看统计与视频设置;Ctrl+Alt+Del 发送三键;在主页
   卡片上右键可移除。
 - 标签页:每台计算机在标题栏里占一个标签页;`+` 显示计算机卡片,可再

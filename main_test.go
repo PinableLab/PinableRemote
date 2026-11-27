@@ -465,11 +465,14 @@ func TestStatsOverlay(t *testing.T) {
 
 func TestParseArgs(t *testing.T) {
 	a := newTestApp(t)
-	file := filepath.Join(t.TempDir(), "mac.tigervnc")
-	os.WriteFile(file, []byte("TigerVNC Configuration file Version 1.0\nServerName=desktop:1\nViewOnly=1\nVideoDecoding=software\n"), 0o600)
-	if s, err := a.parseArgs([]string{"-verbose", "-Shared", file}); err != nil || s != "desktop:1" ||
+	for _, file := range []string{"mac.tigervnc", "/tmp/host.TIGERVNC", `C:\test\host.tigervnc`} {
+		if server, err := a.parseArgs([]string{file}); server != "" || err == nil || !strings.Contains(err.Error(), "configuration files") {
+			t.Errorf("configuration path %q was not rejected: %q, %v", file, server, err)
+		}
+	}
+	if s, err := a.parseArgs([]string{"-verbose", "-Shared", "-ViewOnly", "-VideoDecoding=software", "vnc://desktop:1"}); err != nil || s != "vnc://desktop:1" ||
 		!a.cfg.ViewOnly || !a.cfg.Shared || a.cfg.DecoderMode() != mf.Software {
-		t.Errorf("file: %q %v, config %+v", s, err, a.cfg)
+		t.Errorf("vnc: %q %v, config %+v", s, err, a.cfg)
 	}
 	if s, err := a.parseArgs([]string{"-SecurityTypes", "VncAuth", "-ShortcutModifiers", "Ctrl,Shift", "host:2"}); err != nil ||
 		s != "host:2" || !slices.Equal(a.secTypes, []uint32{rfb.SecTypeVncAuth}) || a.mods != keymap.ModControl|keymap.ModShift {

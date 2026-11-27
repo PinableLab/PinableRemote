@@ -388,7 +388,7 @@ Ctrl+Alt+Shift+Q closes only the active one.
 ## Where the implementation differs
 
 - **Errors.** `app` keeps an `errText` of its own for the home page (a bad
-  address, a `.tigervnc` file that does not load); `tab.errText` is the
+  address); `tab.errText` is the
   error of that tab's connection, shown by its failed view.
 - **Prompt fields.** The prompt state stays as flat fields of `tab`
   (`authOpen`, `keyReply`, …), not a `tabPrompts` value.

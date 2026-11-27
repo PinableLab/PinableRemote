@@ -53,7 +53,7 @@ type app struct {
 	known *viewer.KnownHosts
 	log   *slog.Logger
 
-	// From the command line or a .tigervnc file, for this run.
+	// From the command line, for this run.
 	secTypes []uint32 // nil for the default
 	mods     keymap.Modifier
 
@@ -121,9 +121,8 @@ type app struct {
 	localLED      func() uint32
 	setLED        func(uint32) error
 	displays      func() []string
-	importFile    func()
-	exportFile    func()
-	setLocale     func(tag string) // "" follows the system
+
+	setLocale func(tag string) // "" follows the system
 
 	perf *perfTest // -perftest, else nil
 
@@ -1608,22 +1607,7 @@ func (a *app) applyParams(p *params.Viewer) {
 	}
 }
 
-// loadTiger reads a .tigervnc file into p and returns its server.
-func (a *app) loadTiger(p *params.Viewer, path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	server, warnings, err := p.Load(f)
-	for _, w := range warnings {
-		a.log.Warn("loading "+path, "warning", w)
-	}
-	return server, err
-}
-
-// parseArgs reads TigerVNC's command line: parameters, then a server or
-// a .tigervnc file, to connect to at once.
+// parseArgs reads command-line options followed by an optional server address.
 func (a *app) parseArgs(args []string) (server string, err error) {
 	args = slices.DeleteFunc(slices.Clone(args), func(s string) bool { return s == "-verbose" || s == "--verbose" })
 	p := tigerParams(&a.cfg)
@@ -1636,15 +1620,13 @@ func (a *app) parseArgs(args []string) (server string, err error) {
 	}
 	if len(rest) == 1 {
 		server = rest[0]
-		// A scheme names a server, not a .tigervnc path, even though its
-		// slashes would look like one.
+		address := strings.TrimSpace(server)
+		if !strings.Contains(address, "://") && (strings.HasSuffix(strings.ToLower(address), ".tigervnc") ||
+			strings.ContainsAny(address, `/\`)) {
+			return "", errors.New("configuration files are not supported; enter a server address")
+		}
 		if t, err := viewer.ParseURL(server); err == nil && t.Scheme != viewer.SchemeVNC {
 			return server, nil
-		}
-		if strings.ContainsAny(server, `/\`) {
-			if server, err = a.loadTiger(p, server); err != nil {
-				return "", err
-			}
 		}
 	}
 	a.applyParams(p)
@@ -1653,7 +1635,7 @@ func (a *app) parseArgs(args []string) (server string, err error) {
 
 func usage() string {
 	var b strings.Builder
-	b.WriteString("usage: MyVNC [parameters] [vnc://][host][:displayNum] | ard://host[:port] | rdp://host[:port] | [parameters] file.tigervnc\n\nParameters:\n")
+	b.WriteString("usage: MyVNC [parameters] [vnc://][host][:displayNum] | ard://host[:port] | rdp://host[:port]\n\nParameters:\n")
 	for _, p := range tigerParams(&viewer.Config{}).Params() {
 		fmt.Fprintf(&b, "  %s - %s (default=%s)\n", p.Name(), p.Description(), p.DefaultStr())
 	}
@@ -1835,49 +1817,6 @@ func main() {
 				}
 			}
 			win.SetFullScreen(on)
-		}
-		filters := []mygo.FileFilter{{Name: "TigerVNC", Extensions: []string{"tigervnc"}}}
-		a.importFile = func() {
-			go func() {
-				paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: locales.ImportTigerTitle(), Filters: filters})
-				if err != nil || len(paths) == 0 {
-					return
-				}
-				a.post(func() {
-					p := tigerParams(&a.cfg)
-					server, err := a.loadTiger(p, paths[0])
-					if err != nil {
-						a.errText = err.Error()
-						return
-					}
-					a.applyParams(p)
-					if server != "" {
-						a.cfg.AddServer(server)
-						a.server = server
-					}
-					a.saveConfig()
-				})
-			}()
-		}
-		a.exportFile = func() {
-			server := a.server
-			go func() {
-				path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{Parent: win, Title: locales.ExportTigerTitle(),
-					DefaultPath: "MyVNC.tigervnc", Filters: filters})
-				if err != nil || path == "" {
-					return
-				}
-				a.post(func() {
-					var b strings.Builder
-					err := tigerParams(&a.cfg).Save(&b, server)
-					if err == nil {
-						err = os.WriteFile(path, []byte(b.String()), 0o600)
-					}
-					if err != nil {
-						a.errText = err.Error()
-					}
-				})
-			}()
 		}
 		wireKeyboard(a, win)
 		wireTouch(a, win)

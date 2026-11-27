@@ -1,7 +1,6 @@
 package main
 
 import (
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -112,40 +111,16 @@ func TestPackagedUpdaterOnlyTrustsOwnChannel(t *testing.T) {
 	}
 }
 
-// The TigerVNC page holds the import and export the title bar used to:
-// each applies the settings, which leaves them, then runs the file dialog.
-func TestSettingsTigerVNC(t *testing.T) {
+func TestSettingsHasNoTigerVNCFilesPage(t *testing.T) {
 	a := newTestApp(t)
-	var calls []string
-	a.importFile = func() { calls = append(calls, "import") }
-	a.exportFile = func() { calls = append(calls, "export") }
-	open := func() {
-		t.Helper()
-		for _, step := range []string{"Settings", "TigerVNC files"} {
-			if err := a.tt.Click(step); err != nil {
-				t.Fatal(err)
-			}
-			a.tt.Frame()
-		}
+	if err := a.tt.Click("Settings"); err != nil {
+		t.Fatal(err)
 	}
-	open()
-	if !strings.Contains(strings.Join(a.tt.Texts(), "|"), "holds a server address") {
-		t.Errorf("no help text; texts %q", a.tt.Texts())
+	a.tt.Frame()
+	if !a.settingsOpen || !a.tt.HasText("Updates") {
+		t.Fatalf("settings not visible: %q", a.tt.Texts())
 	}
-	for _, step := range []string{"Import .tigervnc…", "Export .tigervnc…"} {
-		open()
-		if a.settingsOpen != true {
-			t.Fatalf("settings closed before %q", step)
-		}
-		if err := a.tt.Click(step); err != nil {
-			t.Fatal(err)
-		}
-		a.tt.Frame()
-		if a.settingsOpen {
-			t.Errorf("%q left the settings open", step)
-		}
-	}
-	if want := []string{"import", "export"}; !slices.Equal(calls, want) {
-		t.Errorf("calls %q, want %q", calls, want)
+	if a.tt.HasText("TigerVNC files") {
+		t.Fatalf("legacy file settings still visible: %q", a.tt.Texts())
 	}
 }

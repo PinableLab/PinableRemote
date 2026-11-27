@@ -1,8 +1,9 @@
 package main
 
 const (
-	desktopManagedEnv = "PINABLE_REMOTE_DESKTOP"
-	desktopThemeEnv   = "PINABLE_THEME_MODE"
+	desktopManagedEnv       = "PINABLE_REMOTE_DESKTOP"
+	commonDesktopManagedEnv = "PINABLE_DESKTOP_MANAGED"
+	desktopThemeEnv         = "PINABLE_THEME_MODE"
 )
 
 // desktopAppearance returns the active UI mode without rewriting the user's
@@ -29,4 +30,13 @@ func desktopBuildName(managed string) string {
 
 func useStandaloneUpdater(managed string, profiling bool) bool {
 	return managed != "1" && !profiling
+}
+
+// desktopManaged accepts both the specific marker used by older Desktop
+// builds and the marker common to current bundled Pinable components.
+func desktopManaged(specific, common string) string {
+	if specific == "1" || common == "1" {
+		return "1"
+	}
+	return ""
 }

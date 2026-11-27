@@ -579,6 +579,7 @@ func (a *app) syncSettings() {
 func (a *app) closeSettings() {
 	a.syncSettings()
 	a.settingsOpen = false
+	a.aboutOpen = false
 }
 
 // settingsView is the settings page, in place of the home: a sidebar of
@@ -624,6 +625,7 @@ func (a *app) settingsView(c *ui.Context) {
 			})
 		})
 	})
+	a.aboutDialog(c.Key("pinable-about"))
 	// The controls set their values as the frame builds them: they hold
 	// at once, without a button to commit them.
 	a.syncSettings()

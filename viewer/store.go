@@ -212,6 +212,8 @@ type Config struct {
 	// SecureOnly refuses the security types that send credentials or
 	// the session unprotected (SecTypesSecure).
 	SecureOnly bool
+	// RequireScreenPrivacy refuses unconfirmed VNC screen sharing. Native RDP uses a Windows session.
+	RequireScreenPrivacy bool
 	// Unencrypted lists the servers the user lets have a password over
 	// an unencrypted connection without asking.
 	Unencrypted []string

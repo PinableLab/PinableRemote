@@ -127,6 +127,9 @@ func connect(opt rfb.Options, dec mf.Mode, post func(func()), dial func(rfb.Opti
 	s.n.encoding.Store(-1)
 	s.h264, _ = opt.Decoders[rfb.EncodingH264].(*decode.H264)
 	opt.Decoders = timeDecoders(opt.Decoders, &s.n)
+	if opt.RequireScreenPrivacy {
+		opt.HighPerformance = nil // do not request a different display while the curtain is required
+	}
 	if opt.HighPerformance != nil {
 		hp := *opt.HighPerformance
 		s.video = newVideoPipe(dec, hp.MaxFPS, func() {
@@ -457,6 +460,9 @@ func (s *Session) RequestClipboard() {
 // HighPerformance says the session negotiates ARD High Performance,
 // whether or not it fell back.
 func (s *Session) HighPerformance() bool { return s.c.HighPerformance() }
+
+// ScreenPrivacyRequired reports the policy captured at connection time.
+func (s *Session) ScreenPrivacyRequired() bool { return s.c.ScreenPrivacyRequired() }
 
 // RetryHighPerformance asks the Mac for the media stream again after a
 // fallback.

@@ -66,7 +66,13 @@ import (
 
 // Options configures a connection.
 type Options struct {
-	Username string
+	// ManagedView is a restricted RFB 3.8 surface for a task-scoped driver
+	// over an already verified TLS tunnel. It permits only authenticated
+	// VNC, raw fixed-size framebuffer requests, and ordinary session input.
+	// The caller owns certificate verification and must not offer an
+	// unauthenticated TLS connection.
+	ManagedView bool
+	Username    string
 	// Password is called lazily, at most once, when a security type
 	// needs credentials. An empty user falls back to Username.
 	Password func() (user, pass string, err error)
@@ -206,14 +212,15 @@ func (e *AuthError) Error() string { return "rfb: authentication failed: " + e.R
 
 // Client is a connection to an RFB server.
 type Client struct {
-	conn       net.Conn
-	opt        Options
-	h          Handler
-	serverName string
-	closed     atomic.Bool
-	log        *slog.Logger
-	secType    uint32 // the VeNCrypt subtype when VeNCrypt was used
-	secure     bool   // TLS or RSA-AES protects the stream
+	conn                net.Conn
+	opt                 Options
+	h                   Handler
+	serverName          string
+	closed              atomic.Bool
+	managedFramePending atomic.Bool
+	log                 *slog.Logger
+	secType             uint32 // the VeNCrypt subtype when VeNCrypt was used
+	secure              bool   // TLS or RSA-AES protects the stream
 
 	// Read side; touched only by the handshake and Run.
 	rd           reader
@@ -304,6 +311,22 @@ func Dial(ctx context.Context, addr string, opt Options, h Handler) (*Client, er
 // NewClient performs the handshake over an established connection.
 // serverName is used for TLS verification. conn is closed on error.
 func NewClient(ctx context.Context, conn net.Conn, serverName string, opt Options, h Handler) (*Client, error) {
+	if opt.ManagedView {
+		tunnel, ok := conn.(*tls.Conn)
+		if !ok || opt.Decoders[EncodingRaw] == nil {
+			conn.Close()
+			return nil, errors.New("rfb: managed view requires verified TLS and a raw decoder")
+		}
+		if state := tunnel.ConnectionState(); !state.HandshakeComplete || len(state.VerifiedChains) == 0 {
+			conn.Close()
+			return nil, errors.New("rfb: managed view requires a verified TLS peer")
+		}
+		opt.SecurityTypes = []uint32{SecTypeVncAuth}
+		opt.Shared = true
+		opt.HighPerformance = nil
+		opt.AutoSelect = false
+	}
+
 	in := &countConn{Conn: conn}
 	conn = in
 	c := &Client{
@@ -324,6 +347,10 @@ func NewClient(ctx context.Context, conn net.Conn, serverName string, opt Option
 	c.fullPF = c.pf
 	stop := context.AfterFunc(ctx, func() { conn.SetDeadline(time.Unix(1, 0)) })
 	err := c.handshake(ctx)
+	if opt.ManagedView {
+		c.opt.Password = nil
+		c.user, c.pass, c.haveCreds = "", "", false
+	}
 	if !stop() {
 		err = ctx.Err()
 	}
@@ -414,7 +441,10 @@ func (c *Client) handshake(ctx context.Context) error {
 		return errors.New("rfb: reading version failed, not an RFB server?")
 	}
 	c.major, c.minor = major, minor
-	c.appleARD = major == 3 && minor == 889
+	c.appleARD = !c.opt.ManagedView && major == 3 && minor == 889
+	if c.opt.ManagedView && (major != 3 || minor < 8) {
+		return errors.New("rfb: managed view requires RFB 3.8 or newer")
+	}
 	c.log.Info("rfb: server version", "version", fmt.Sprintf("%d.%d", major, minor), "ard", c.appleARD)
 	switch {
 	case c.before(3, 3):
@@ -460,6 +490,9 @@ func (c *Client) handshake(ctx context.Context) error {
 
 func (c *Client) readServerInit() error {
 	w, h := int(c.rd.u16()), int(c.rd.u16())
+	if c.opt.ManagedView && (w < 1 || h < 1 || w > 4096 || h > 4096 || w*h > 8<<20) {
+		return errors.New("rfb: managed framebuffer dimensions exceed limit")
+	}
 	c.rd.skip(16) // server pixel format; we always set our own
 	n := c.rd.u32()
 	if c.rd.err != nil {
@@ -548,8 +581,10 @@ func (c *Client) finishInit() error {
 	c.log.Info("rfb: encodings", "list", encs)
 	msgs = append(msgs,
 		setPixelFormat(&c.pf),
-		setEncodings(encs),
-		framebufferUpdateRequest(false, c.width, c.height))
+		setEncodings(encs))
+	if !c.opt.ManagedView {
+		msgs = append(msgs, framebufferUpdateRequest(false, c.width, c.height))
+	}
 	for _, m := range msgs {
 		if err := c.write(m); err != nil {
 			return err
@@ -559,6 +594,9 @@ func (c *Client) finishInit() error {
 }
 
 func (c *Client) encodingList() []int32 {
+	if c.opt.ManagedView {
+		return []int32{EncodingRaw}
+	}
 	list := c.opt.Encodings
 	if list == nil {
 		list = defaultEncodings(c.opt.Decoders)

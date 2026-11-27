@@ -48,6 +48,36 @@ func (c *Client) writeLocked(b []byte) error {
 // stalls) flushes after each.
 func (c *Client) Flush() error { return c.writeWait(context.Background(), nil) }
 
+// RequestManagedFrame requests one complete, uncompressed frame on a
+// managed-view client. The handler receives it in UpdateDone.
+func (c *Client) RequestManagedFrame(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !c.opt.ManagedView || !c.managedFramePending.CompareAndSwap(false, true) {
+		return errors.New("rfb: cannot request managed framebuffer")
+	}
+	// Dimensions are immutable in managed view.
+	err := c.writeWait(ctx, framebufferUpdateRequest(false, c.width, c.height))
+	if err != nil {
+		c.Close() // do not reuse a stream after an uncertain send
+	}
+	return err
+}
+
+// FlushManagedInput waits until previously queued input reached the session
+// transport. A failed flush terminates the managed session.
+func (c *Client) FlushManagedInput(ctx context.Context) error {
+	if !c.opt.ManagedView {
+		return errors.New("rfb: not a managed view")
+	}
+	err := c.writeWait(ctx, nil)
+	if err != nil {
+		c.Close()
+	}
+	return err
+}
+
 // writeWait sends b and waits, without c.mu, until it is on the wire,
 // ctx is done or the connection closes: bulk data (file copy) keeps the
 // network's backpressure instead of piling up in the queue. On ctx the

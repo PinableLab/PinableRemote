@@ -843,6 +843,9 @@ func (a *app) settingsPages() []settingsPage {
 		settingSwitch(c, k, locales.Reconnect(), "", &a.cfg.Reconnect)
 		settingSwitch(c, k, locales.HighPerformance(), "", &a.cfg.HighPerformance)
 		settingSwitch(c, k, locales.SecureOnly(), "", &a.cfg.SecureOnly)
+		if settingSwitch(c, k, locales.ScreenPrivacy(), locales.ScreenPrivacyHint(), &a.cfg.RequireScreenPrivacy) {
+			a.saveConfig()
+		}
 	}}
 	credentialsPage := settingsPage{"credentials", "lock", locales.Credentials(), a.credentialsView}
 	windowPage := settingsPage{"window", "app-window", locales.Window(), func(c *ui.Context, k *colors) {

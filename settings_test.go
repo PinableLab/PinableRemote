@@ -133,3 +133,23 @@ func TestSettingsApplyLive(t *testing.T) {
 		t.Errorf("no home view; texts %q", a.tt.Texts())
 	}
 }
+
+func TestSettingsScreenPrivacySwitch(t *testing.T) {
+	a := newTestApp(t)
+	for _, step := range []string{"Settings", "Connection"} {
+		if err := a.tt.Click(step); err != nil {
+			t.Fatal(err)
+		}
+		a.tt.Frame()
+	}
+	r, ok := a.tt.Find("Require privacy screen")
+	if !ok || a.cfg.RequireScreenPrivacy {
+		t.Fatalf("missing opt-in switch or enabled by default: %v", a.tt.Texts())
+	}
+	a.tt.ClickAt(r.X+r.W+20, r.Y+r.H/2)
+	a.tt.Frame()
+	saved, err := viewer.LoadConfig(filepath.Join(a.dir, "config.json"))
+	if err != nil || !saved.RequireScreenPrivacy || !a.cfg.RequireScreenPrivacy {
+		t.Fatalf("privacy preference not saved: %v, %v / %v", a.cfg.RequireScreenPrivacy, saved.RequireScreenPrivacy, err)
+	}
+}

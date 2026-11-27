@@ -1553,6 +1553,56 @@ func (msgs Messages) Security() string {
 	return Catalog.Format(msgs.locale, "security", nil)
 }
 
+// ScreenPrivacy says "Require privacy screen"
+// in the language the app shows.
+func ScreenPrivacy() string { return In(i18n.Locale()).ScreenPrivacy() }
+
+// ScreenPrivacy says "Require privacy screen"
+// in the language of msgs.
+func (msgs Messages) ScreenPrivacy() string {
+	return Catalog.Format(msgs.locale, "screenPrivacy", nil)
+}
+
+// ScreenPrivacyHint says "Applies to new connections. VNC requires a confirmed Mac curtain; Windows RDP uses a separate system session."
+// in the language the app shows.
+func ScreenPrivacyHint() string { return In(i18n.Locale()).ScreenPrivacyHint() }
+
+// ScreenPrivacyHint says "Applies to new connections. VNC requires a confirmed Mac curtain; Windows RDP uses a separate system session."
+// in the language of msgs.
+func (msgs Messages) ScreenPrivacyHint() string {
+	return Catalog.Format(msgs.locale, "screenPrivacyHint", nil)
+}
+
+// ErrPrivacyUnsupported says "This VNC host does not offer verified screen privacy. For Mac, enable Remote Management with control permission. For …"
+// in the language the app shows.
+func ErrPrivacyUnsupported() string { return In(i18n.Locale()).ErrPrivacyUnsupported() }
+
+// ErrPrivacyUnsupported says "This VNC host does not offer verified screen privacy. For Mac, enable Remote Management with control permission. For …"
+// in the language of msgs.
+func (msgs Messages) ErrPrivacyUnsupported() string {
+	return Catalog.Format(msgs.locale, "errPrivacyUnsupported", nil)
+}
+
+// ErrPrivacyUnconfirmed says "The Mac did not confirm the curtain. The connection was stopped."
+// in the language the app shows.
+func ErrPrivacyUnconfirmed() string { return In(i18n.Locale()).ErrPrivacyUnconfirmed() }
+
+// ErrPrivacyUnconfirmed says "The Mac did not confirm the curtain. The connection was stopped."
+// in the language of msgs.
+func (msgs Messages) ErrPrivacyUnconfirmed() string {
+	return Catalog.Format(msgs.locale, "errPrivacyUnconfirmed", nil)
+}
+
+// ErrPrivacyLost says "The Mac no longer confirms screen privacy. The session was disconnected."
+// in the language the app shows.
+func ErrPrivacyLost() string { return In(i18n.Locale()).ErrPrivacyLost() }
+
+// ErrPrivacyLost says "The Mac no longer confirms screen privacy. The session was disconnected."
+// in the language of msgs.
+func (msgs Messages) ErrPrivacyLost() string {
+	return Catalog.Format(msgs.locale, "errPrivacyLost", nil)
+}
+
 // SecureOnly says "Refuse None, VNC auth, Plain and other weak types"
 // in the language the app shows.
 func SecureOnly() string { return In(i18n.Locale()).SecureOnly() }

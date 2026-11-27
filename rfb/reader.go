@@ -388,6 +388,9 @@ func (c *Client) readRect(r image.Rectangle, enc int32) (last bool, err error) {
 				return false, c.rd.err
 			}
 			c.log.Debug("rfb: ARD layout 1105", "body", fmt.Sprintf("%x", body))
+			if err := c.observePrivacyLayout(body); err != nil {
+				return false, err
+			}
 			if w, h, ok := ardLayout2Size(body); ok {
 				c.displayLaid(w, h)
 				if w != c.width || h != c.height { // only this goroutine sets them

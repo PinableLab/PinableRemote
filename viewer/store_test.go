@@ -3,6 +3,7 @@ package viewer
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -134,5 +135,23 @@ func TestComputerDisplayRoundTrip(t *testing.T) {
 	b, _ := json.Marshal(c.Computers["plain"])
 	if strings.Contains(string(b), "Width") || strings.Contains(string(b), "Scale") {
 		t.Errorf("plain computer saved as %s", b)
+	}
+}
+
+func TestLegacyAgentPreferenceIsIgnored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"MCPEnabled":true,"Servers":["ard://sample"],"RequireScreenPrivacy":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(path)
+	if err != nil || !c.RequireScreenPrivacy || !slices.Equal(c.Servers, []string{"ard://sample"}) {
+		t.Fatalf("connection preferences not preserved: %+v, %v", c, err)
+	}
+	if err := c.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(raw), "MCPEnabled") {
+		t.Fatalf("obsolete Agent preference was saved: %s (%v)", raw, err)
 	}
 }

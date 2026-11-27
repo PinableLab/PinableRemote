@@ -27,7 +27,6 @@ import (
 	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
-	"github.com/si-mods/MyVNC/internal/mcpserver"
 	"github.com/si-mods/MyVNC/internal/mf"
 	"github.com/si-mods/MyVNC/internal/win32"
 	"github.com/si-mods/MyVNC/locales"
@@ -1721,12 +1720,12 @@ func takeShot(a *app, win *mygo.Window, path string, waitForSession bool) {
 }
 
 func main() {
-	// --mcp, first: an MCP server on stdio. Nothing of the window, the
-	// settings or the updater is touched.
+	// Reserve the removed switch: stale external integrations must not
+	// launch the GUI, read credentials or open a connection.
 	if len(os.Args) > 1 && os.Args[1] == "--mcp" {
 		attachConsole()
-		os.Exit(mcpserver.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr,
-			mcpserver.ConfigGate(func() (string, error) { return mygo.App.Path(mygo.PathUserData) })))
+		fmt.Fprintln(os.Stderr, "PinableRemote: the standalone Agent (MCP) mode has been removed.")
+		os.Exit(2)
 	}
 	perf, args, perfErr := perfArgs(os.Args[1:])
 	if perfErr != nil {

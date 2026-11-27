@@ -227,8 +227,6 @@ type Config struct {
 	Language            string // of the UI, as "zh-Hans"; "" follows the system
 	Theme               string // "", "light" or "dark"; "" follows the system
 	WheelLines          int    // lines one wheel notch scrolls, 0 follows the system
-	// MCPEnabled lets "MyVNC --mcp" serve agents; off unless set.
-	MCPEnabled bool
 }
 
 // Computer is what the home view knows of a server.

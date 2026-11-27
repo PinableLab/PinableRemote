@@ -15,8 +15,11 @@ a host argument. Starting the viewer must not start a remote session.
   import in Desktop. Retain the [upstream license](../LICENSE),
   [third-party notices](../README.third-party.md), and corresponding-source access
   for the exact distributed build.
-- The managed GUI launch does not enable or start MCP. It does not inherit
-  Desktop's credentials or authorize remote access.
+- The managed GUI launch does not inherit Desktop credentials or authorize
+  task access. The old standalone Agent (MCP) mode was removed. Existing
+  external clients should remove their `--mcp` integration; this argument
+  is rejected before any viewer or connection starts. The planned, separate
+  Desktop task integration is not part of this GUI launch contract.
 
 ## Desktop integration checklist (not yet implemented here)
 

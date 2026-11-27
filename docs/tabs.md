@@ -24,8 +24,6 @@ another tab is shown.
 - Restoring the open tabs at the next start.
 - Showing two sessions side by side (split view).
 - Forwarding a second `MyVNC.exe host` launch into the running window.
-- The MCP server (`--mcp`): it is a separate process and has its own
-  sessions (`internal/mcpserver`).
 
 ## Current state
 

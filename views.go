@@ -864,11 +864,6 @@ func (a *app) settingsPages() []settingsPage {
 			}
 		}
 	}}
-	agentPage := settingsPage{"agent", "bot", locales.AgentMCP(), func(c *ui.Context, k *colors) {
-		if settingSwitch(c, k, locales.AllowMCP(), locales.McpHelp(), &a.cfg.MCPEnabled) {
-			a.saveConfig()
-		}
-	}}
 	updatesPage := settingsPage{"updates", "refresh-cw", locales.Updates(), a.updatesView}
 	tigerPage := settingsPage{"tigervnc", "file-input", locales.TigerVNC(), func(c *ui.Context, k *colors) {
 		settingNote(c, k, locales.TigerHelp())
@@ -885,7 +880,7 @@ func (a *app) settingsPages() []settingsPage {
 			})
 		}
 	}}
-	return []settingsPage{interfacePage, videoPage, clipboardPage, inputPage, connectionPage, credentialsPage, windowPage, agentPage, updatesPage, tigerPage}
+	return []settingsPage{interfacePage, videoPage, clipboardPage, inputPage, connectionPage, credentialsPage, windowPage, updatesPage, tigerPage}
 }
 
 // credentialsView is the settings page of the accounts kept for servers:

@@ -69,8 +69,6 @@ RDP 仅限 Windows。
   都是 VNC/RFB(Mac 的 ARD 方言无论带不带上缀都会自动识别),`rdp://`
   走远程桌面;其它前缀在连接前就被拒绝。兼容 TigerVNC 命令行选项与
   `.tigervnc` 配置文件(完整列表见 `MyVNC.exe -h`)。
-- AI 代理:`MyVNC.exe --mcp` 以 stdio 运行 MCP 服务,不显示窗口
-  ([docs/MCP.md](docs/MCP.md)),需先在设置中开启。
 - 会话内:悬浮面板查看统计与视频设置;Ctrl+Alt+Del 发送三键;在主页
   卡片上右键可移除。
 - 标签页:每台计算机在标题栏里占一个标签页;`+` 显示计算机卡片,可再
@@ -103,7 +101,7 @@ go tool mygo build   # 构建 exe 与安装包到 build/(macOS 为 MyVNC.app)
 
 | 文档 | 内容 |
 |---|---|
-| [docs/MCP.md](docs/MCP.md) | `MyVNC.exe --mcp`:面向 AI 代理的 MCP 服务 |
+| [隐私屏幕](docs/privacy-screen.md) | 实体屏幕隐私策略及验收步骤 |
 | [docs/rdp.md](docs/rdp.md) | RDP 会话:用法、凭据、限制 |
 | [docs/tabs.md](docs/tabs.md) | 标签页:一个窗口里的多个会话 |
 | [docs/bandwidth.md](docs/bandwidth.md) | 链路测量、画质策略、服务端配合项 |

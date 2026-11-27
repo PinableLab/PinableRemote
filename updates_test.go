@@ -27,10 +27,12 @@ func TestSettingsUpdates(t *testing.T) {
 	if texts := strings.Join(a.tt.Texts(), "|"); !strings.Contains(texts, "Never checked for updates") {
 		t.Errorf("no last check; texts %q", texts)
 	}
-	if err := a.tt.Click("Check now"); err != nil {
-		t.Fatal(err)
+	for _, step := range []string{"About", "Check for updates", "Close"} {
+		if err := a.tt.Click(step); err != nil {
+			t.Fatal(err)
+		}
+		a.tt.Frame()
 	}
-	a.tt.Frame()
 	if checks != 1 {
 		t.Fatalf("checks %d, want 1", checks)
 	}
@@ -53,24 +55,60 @@ func TestSettingsUpdates(t *testing.T) {
 	}
 }
 
-// Without the plugin, as in development builds, the page says the build
-// cannot update itself instead of offering a check that would fail.
-func TestSettingsUpdatesWithoutPlugin(t *testing.T) {
+func TestSettingsDesktopAboutNeverChecksStandalone(t *testing.T) {
 	a := newTestApp(t)
-	if err := a.tt.Click("Settings"); err != nil {
-		t.Fatal(err)
+	a.desktopManaged, a.version = "1", "1.2.3"
+	a.upds = &updateHooks{check: func() { t.Fatal("Desktop helper called a standalone updater") }}
+	for _, step := range []string{"Settings", "Updates", "About"} {
+		if err := a.tt.Click(step); err != nil {
+			t.Fatal(err)
+		}
+		a.tt.Frame()
 	}
-	a.tt.Frame()
-	if err := a.tt.Click("Updates"); err != nil {
-		t.Fatal(err)
-	}
-	a.tt.Frame()
 	texts := strings.Join(a.tt.Texts(), "|")
-	if !strings.Contains(texts, "cannot update itself") {
-		t.Errorf("no unavailable note; texts %q", texts)
+	if !strings.Contains(texts, "This component is updated with Pinable Desktop") || !strings.Contains(texts, "1.2.3") {
+		t.Errorf("no Desktop update status or version; texts %q", texts)
 	}
-	if strings.Contains(texts, "Check now") {
-		t.Errorf("a check is offered without an updater; texts %q", texts)
+	if _, ok := a.tt.Find("View PinableRemote releases"); ok {
+		t.Errorf("standalone check is offered to a Desktop helper; texts %q", texts)
+	}
+}
+
+func TestSettingsStandaloneOffersOfficialManualReleases(t *testing.T) {
+	a := newTestApp(t)
+	for _, step := range []string{"Settings", "Updates", "About"} {
+		if err := a.tt.Click(step); err != nil {
+			t.Fatal(err)
+		}
+		a.tt.Frame()
+	}
+	if _, ok := a.tt.Find("View PinableRemote releases"); !ok {
+		t.Fatalf("no manual release action; texts %q", a.tt.Texts())
+	}
+	if _, ok := a.tt.Find("Check for updates"); ok {
+		t.Fatal("an installer check is available without an owned signed channel")
+	}
+}
+
+func TestPackagedUpdaterOnlyTrustsOwnChannel(t *testing.T) {
+	if hasOwnedSignedUpdates(packagedUpdateConfig) {
+		t.Fatal("inherited MyVNC update config would activate autonomous upstream updates")
+	}
+	for _, tc := range []struct {
+		json string
+		want bool
+	}{
+		{`{"updates":{"github":"si-mods/MyVNC","publicKey":"signed-key"}}`, false},
+		{`{"updates":{"github":"pinablelab/pinableremote"}}`, false},
+		{`{"updates":{"github":"PinableLab/PinableRemote","publicKey":"aG9jN0hldEsvK041SCt4QzJEMWMwU0xkWXVxSEVuZ00="}}`, true},
+		{`{"updates":`, false},
+	} {
+		if got := hasOwnedSignedUpdates([]byte(tc.json)); got != tc.want {
+			t.Errorf("config %s: allow=%t, want %t", tc.json, got, tc.want)
+		}
+	}
+	if desktopManaged("", "1") != "1" || desktopManaged("1", "") != "1" || desktopManaged("yes", "") != "" {
+		t.Fatal("Desktop launch markers were not respected")
 	}
 }
 

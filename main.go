@@ -66,6 +66,7 @@ type app struct {
 	editForm           rdpForm
 	editErr            string
 	settingsOpen       bool
+	aboutOpen          bool
 	settingsPage       string // the settings page shown
 	appearance         string // active UI mode; Desktop can override it for this process
 	desktopManaged     string
@@ -1755,11 +1756,11 @@ func main() {
 		fmt.Print(usage())
 		return
 	}
-	a.desktopManaged = os.Getenv(desktopManagedEnv)
+	a.desktopManaged = desktopManaged(os.Getenv(desktopManagedEnv), os.Getenv(commonDesktopManagedEnv))
 	a.appearance = desktopAppearance(a.cfg.Theme, a.desktopManaged, os.Getenv(desktopThemeEnv))
 	setThemeSource(a.appearance)
 	mygo.App.SetLocale(a.cfg.Language) // the setting is the config's
-	if useStandaloneUpdater(a.desktopManaged, perf != nil) {
+	if useStandaloneUpdater(a.desktopManaged, perf != nil) && hasOwnedSignedUpdates(packagedUpdateConfig) {
 		mygo.Use(native.New(updater.Options{Language: a.cfg.Language}))
 		a.upds = &updateHooks{
 			check:   updater.CheckForUpdates,

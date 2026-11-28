@@ -1,11 +1,19 @@
-/* Compile-only FreeRDP 3.33.1 feasibility fixture. No network sockets.
+/* FreeRDP 3.33.1 SDK feasibility fixture. No remote connection.
  * Tests the API hooks future managedrdp.Driver would implement. */
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <errno.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
+#endif
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -221,6 +229,7 @@ static void trust_ca(Session *s, const char *file)
 	BIO_free(bio);
 }
 
+#ifndef _WIN32
 /* Deny network egress even if a future SDK bypasses the stub. Linux fixture. */
 static void no_network(void)
 {
@@ -236,10 +245,14 @@ static void no_network(void)
 	REQUIRE(prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0);
 }
 
+#endif
+
 int main(int argc, char **argv)
 {
 	REQUIRE(argc == 3);
+#ifndef _WIN32
 	no_network();
+#endif
 	freerdp *a = fixture_init("server-fixture.example.test", 3389, "test-user");
 	freerdp *b = fixture_init("other-fixture.example.test", 3389, "test-user");
 	Session *sa = (Session *)a->context;
@@ -293,11 +306,17 @@ int main(int argc, char **argv)
 	BOOL (*mouse)(rdpInput *, UINT16, UINT16, UINT16) = freerdp_input_send_mouse_event;
 	BOOL (*keys)(rdpInput *, BOOL, BOOL, UINT32) = freerdp_input_send_keyboard_event_ex;
 	REQUIRE(mouse && keys && a->context->input != b->context->input);
-	/* The real SDK invokes an overridden, non-networking transport on connect. */
+	/* This connect-path probe requires Linux kernel-level egress blocking. */
+#ifndef _WIN32
 	REQUIRE(!freerdp_connect(b));
 	REQUIRE(sb->blocked_connects >= 1);
+#endif
 	free_fixture(a);
 	free_fixture(b);
+#ifdef _WIN32
+	puts("PASS: native Windows SDK hooks; no connect; verified host/CA; synthetic post-logon frame; two isolated contexts");
+#else
 	puts("PASS: 3.33.1 SDK hooks; no socket; verified host/CA; post-logon frame; two isolated contexts");
+#endif
 	return 0;
 }

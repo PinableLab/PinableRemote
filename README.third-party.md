@@ -13,6 +13,8 @@
 
 | Project / 项目 | License / 许可证 |
 |---|---|
+| [FreeRDP](https://github.com/FreeRDP/FreeRDP) 3.33.1 (optional macOS backend / 可选 macOS 后端) | Apache-2.0 ([LICENSES/FreeRDP-Apache-2.0.txt](LICENSES/FreeRDP-Apache-2.0.txt)) |
+| [OpenSSL](https://www.openssl.org/) 3 (FreeRDP TLS dependency / FreeRDP TLS 依赖) | Apache-2.0 |
 | [MyGo](https://github.com/egoist/mygo) | MIT |
 | [purego](https://github.com/ebitengine/purego) | Apache-2.0 |
 | [go-text/typesetting](https://github.com/go-text/typesetting) | Unlicense or BSD-3-Clause |

@@ -38,6 +38,30 @@ func TestKnownHosts(t *testing.T) {
 	}
 }
 
+func TestKnownCertFingerprint(t *testing.T) {
+	k := &KnownHosts{Path: filepath.Join(t.TempDir(), "known_hosts.json")}
+	der := []byte("certificate")
+	if fp, err := k.CertFingerprintFor("h:3389"); err != nil || fp != "" {
+		t.Fatalf("unknown host: %q, %v", fp, err)
+	}
+	// FreeRDP reports the fingerprint in lower case.
+	if err := k.AddCertFingerprint("h:3389", strings.ToLower(CertFingerprint(der))); err != nil {
+		t.Fatal(err)
+	}
+	if fp, err := k.CertFingerprintFor("h:3389"); err != nil || fp != CertFingerprint(der) {
+		t.Fatalf("got %q, %v", fp, err)
+	}
+	// It is the same record as a certificate trusted with its DER.
+	if err := k.CheckCert("h:3389", der); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "zz", "AB:CD"} {
+		if k.AddCertFingerprint("h:3389", bad) == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}
+
 func TestConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	c, err := LoadConfig(path)

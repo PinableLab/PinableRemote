@@ -244,3 +244,14 @@ func TestEOFRevokesDuringDial(t *testing.T) {
 		t.Fatal("EOF did not cancel in-flight dial")
 	}
 }
+
+func TestStoredBindingCarriesNoPassword(t *testing.T) {
+	b := Binding{Host: "qa.example.test", Port: 3389, User: "tester", TTLSeconds: 60}
+	if !validStoredBinding(b) || validBinding(b) {
+		t.Fatal("a stored binding has no password")
+	}
+	b.Password = "secret"
+	if validStoredBinding(b) || !validBinding(b) {
+		t.Fatal("a stored binding must not carry a password")
+	}
+}

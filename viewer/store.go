@@ -128,9 +128,39 @@ func (k *KnownHosts) AddCert(addr string, der []byte) error {
 	return k.add("x509 "+addr, keyHash(der))
 }
 
+// CertFingerprintFor returns the trusted certificate of addr in the form of
+// CertFingerprint, or "" when there is none.
+func (k *KnownHosts) CertFingerprintFor(addr string) (string, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	m, err := k.load()
+	if err != nil {
+		return "", err
+	}
+	b, err := hex.DecodeString(m["x509 "+addr])
+	if err != nil || len(b) != sha256.Size {
+		return "", nil
+	}
+	return colonHex(b), nil
+}
+
+// AddCertFingerprint trusts for addr the certificate whose CertFingerprint
+// is fingerprint, as reported by a client that does not expose the DER.
+func (k *KnownHosts) AddCertFingerprint(addr, fingerprint string) error {
+	b, err := hex.DecodeString(strings.ReplaceAll(fingerprint, ":", ""))
+	if err != nil || len(b) != sha256.Size {
+		return fmt.Errorf("invalid certificate fingerprint %q", fingerprint)
+	}
+	return k.add("x509 "+addr, hex.EncodeToString(b))
+}
+
 // CertFingerprint is the SHA-256 of a certificate as colon-separated hex.
 func CertFingerprint(der []byte) string {
 	h := sha256.Sum256(der)
+	return colonHex(h[:])
+}
+
+func colonHex(h []byte) string {
 	b := make([]byte, 0, 3*len(h))
 	for i, x := range h {
 		if i > 0 {

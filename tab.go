@@ -60,6 +60,7 @@ type tab struct {
 	// An embedded Remote Desktop session, if one runs.
 	rdp        *win32.RDP
 	rdpAddr    string
+	rdpDial    string // host:port, the key of its certificate in known_hosts.json
 	rdpResize  *time.Timer
 	rdpW, rdpH int32
 	// The computer's fixed size (0: follow the window) and desktop scale

@@ -57,7 +57,8 @@ static BOOL pin_paint(rdpContext* c) {
     return p != NULL;
 }
 static BOOL pin_post_connect(freerdp* f) {
-    if (!gdi_init(f, PIXEL_FORMAT_BGRA32)) return FALSE;
+    // 桌面帧不含透明度，第四个字节是填充而非 alpha。
+    if (!gdi_init(f, PIXEL_FORMAT_BGRX32)) return FALSE;
     f->context->update->EndPaint = pin_paint;
     return TRUE;
 }
@@ -171,16 +172,22 @@ static void* pin_worker(void* arg) {
 - (void)tick:(NSTimer*)unused {
     pthread_mutex_lock(&state->mu);
     if (state->dirty && state->pixels) {
-        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
-            pixelsWide:state->width pixelsHigh:state->height bitsPerSample:8 samplesPerPixel:4
-            hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace
-            bitmapFormat:NSBitmapFormatAlphaFirst | NSBitmapFormatThirtyTwoBitLittleEndian
-            bytesPerRow:state->stride bitsPerPixel:32];
-        if (rep) {
-            memcpy(rep.bitmapData, state->pixels, (size_t)state->stride * state->height);
-            [image release]; image = [[NSImage alloc] initWithSize:NSMakeSize(state->width, state->height)];
-            [image addRepresentation:rep]; [rep release];
+        // Core Graphics 的小端 XRGB 对应内存中的 B、G、R、X。
+        // CFData 持有独立副本，协议线程可以继续覆盖下一帧。
+        CFDataRef data = CFDataCreate(NULL, state->pixels, (CFIndex)state->stride * state->height);
+        CGDataProviderRef provider = data ? CGDataProviderCreateWithCFData(data) : NULL;
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGImageRef frame = provider && colorSpace ? CGImageCreate(state->width, state->height,
+            8, 32, state->stride, colorSpace, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
+            provider, NULL, true, kCGRenderingIntentDefault) : NULL;
+        if (frame) {
+            [image release];
+            image = [[NSImage alloc] initWithCGImage:frame size:NSMakeSize(state->width, state->height)];
+            CGImageRelease(frame);
         }
+        if (colorSpace) CGColorSpaceRelease(colorSpace);
+        if (provider) CGDataProviderRelease(provider);
+        if (data) CFRelease(data);
         state->dirty = NO;
         [self setNeedsDisplay:YES];
     }

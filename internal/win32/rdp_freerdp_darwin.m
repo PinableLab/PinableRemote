@@ -23,7 +23,7 @@ typedef struct {
     freerdp* instance;
     BYTE* pixels;
     int width, height, stride;
-    BOOL dirty;
+    HANDLE inputReady;
     PinInput events[1024];
     unsigned count;
     int certPending, certAnswer, certChanged;
@@ -37,6 +37,7 @@ static void pin_unref(PinState* s) {
     if (!s) return;
     if (atomic_fetch_sub(&s->refs, 1) == 1) {
         free(s->pixels);
+        if (s->inputReady) CloseHandle(s->inputReady);
         pthread_mutex_destroy(&s->mu);
         free(s);
     }
@@ -49,12 +50,13 @@ static BOOL pin_paint(rdpContext* c) {
         g->stride < (UINT32)g->width * 4 || g->stride > 8192 * 4) return FALSE;
     size_t size = (size_t)g->stride * g->height;
     pthread_mutex_lock(&s->mu);
-    BYTE* p = realloc(s->pixels, size);
+    // 尚未显示的帧直接覆写；已交给 Core Graphics 的帧不再修改。
+    BYTE* p = s->pixels && s->stride == g->stride && s->height == g->height
+        ? s->pixels : realloc(s->pixels, size);
     if (p) {
         s->pixels = p;
         memcpy(p, g->primary_buffer, size);
         s->width = g->width; s->height = g->height; s->stride = g->stride;
-        s->dirty = YES;
     }
     pthread_mutex_unlock(&s->mu);
     return p != NULL;
@@ -120,6 +122,7 @@ static void* pin_worker(void* arg) {
             pthread_mutex_lock(&s->mu);
             unsigned count = s->count;
             memcpy(events, s->events, count * sizeof(PinInput)); s->count = 0;
+            ResetEvent(s->inputReady);
             pthread_mutex_unlock(&s->mu);
             for (unsigned i = 0; i < count; i++) {
                 PinInput e = events[i];
@@ -129,8 +132,11 @@ static void* pin_worker(void* arg) {
                 if (!sent) atomic_store(&s->stop, 1);
             }
             HANDLE handles[64];
-            DWORD n = freerdp_get_event_handles(f->context, handles, 64);
-            if (!n || WaitForMultipleObjects(n, handles, FALSE, 16) == WAIT_FAILED ||
+            DWORD n = freerdp_get_event_handles(f->context, handles, 63);
+            if (!n || n > 63) break;
+            // 键鼠事件直接唤醒协议线程，不必等下一次网络轮询。
+            handles[n++] = s->inputReady;
+            if (WaitForMultipleObjects(n, handles, FALSE, 16) == WAIT_FAILED ||
                 !freerdp_check_event_handles(f->context)) break;
         }
     }
@@ -177,35 +183,38 @@ static void* pin_worker(void* arg) {
     [self addTrackingArea:tracking];
 }
 - (void)drawRect:(NSRect)rect {
-    [[NSColor blackColor] setFill]; NSRectFill(self.bounds);
     if (image) [image drawInRect:self.bounds fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1 respectFlipped:YES hints:nil];
+    else { [[NSColor blackColor] setFill]; NSRectFill(rect); }
 }
 - (void)tick:(NSTimer*)unused {
     pthread_mutex_lock(&state->mu);
-    if (state->dirty && state->pixels) {
-        // Core Graphics 的小端 XRGB 对应内存中的 B、G、R、X。
-        // CFData 持有独立副本，协议线程可以继续覆盖下一帧。
-        CFDataRef data = CFDataCreate(NULL, state->pixels, (CFIndex)state->stride * state->height);
-        CGDataProviderRef provider = data ? CGDataProviderCreateWithCFData(data) : NULL;
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-        CGImageRef frame = provider && colorSpace ? CGImageCreate(state->width, state->height,
-            8, 32, state->stride, colorSpace, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
-            provider, NULL, true, kCGRenderingIntentDefault) : NULL;
-        if (frame) {
-            [image release];
-            image = [[NSImage alloc] initWithCGImage:frame size:NSMakeSize(state->width, state->height)];
-            CGImageRelease(frame);
-        }
-        if (colorSpace) CGColorSpaceRelease(colorSpace);
-        if (provider) CGDataProviderRelease(provider);
-        if (data) CFRelease(data);
-        state->dirty = NO;
-        [self setNeedsDisplay:YES];
-    }
+    BOOL visible = !self.hidden;
+    BYTE* pixels = visible ? state->pixels : NULL;
+    int width = state->width, height = state->height, stride = state->stride;
+    if (pixels) state->pixels = NULL;
     BOOL cert = state->certPending == 1, changed = state->certChanged != 0;
     NSString* details = cert ? [[NSString alloc] initWithUTF8String:state->cert] : nil;
     if (cert) state->certPending = 2;
     pthread_mutex_unlock(&state->mu);
+    if (pixels) {
+        // Core Graphics 的小端 XRGB 对应内存中的 B、G、R、X。
+        // 转移帧缓冲所有权，不在主线程做第二次全帧复制。
+        CFDataRef data = CFDataCreateWithBytesNoCopy(NULL, pixels, (CFIndex)stride * height, kCFAllocatorMalloc);
+        if (!data) free(pixels);
+        CGDataProviderRef provider = data ? CGDataProviderCreateWithCFData(data) : NULL;
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGImageRef frame = provider && colorSpace ? CGImageCreate(width, height,
+            8, 32, stride, colorSpace, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
+            provider, NULL, true, kCGRenderingIntentDefault) : NULL;
+        if (frame) {
+            NSImage* next = [[NSImage alloc] initWithCGImage:frame size:NSMakeSize(width, height)];
+            CGImageRelease(frame);
+            if (next) { [image release]; image = next; [self setNeedsDisplay:YES]; }
+        }
+        if (colorSpace) CGColorSpaceRelease(colorSpace);
+        if (provider) CGDataProviderRelease(provider);
+        if (data) CFRelease(data);
+    }
     if (cert && !atomic_load(&state->stop)) {
         [self retain]; // 证书确认期间关闭主窗口不能释放当前回调的状态。
         BOOL zh = [[[NSLocale preferredLanguages] firstObject] hasPrefix:@"zh"];
@@ -235,8 +244,13 @@ static void* pin_worker(void* arg) {
 - (void)enqueue:(PinInput)e {
     if (!atomic_load(&state->connected)) return;
     pthread_mutex_lock(&state->mu);
-    if (state->count < 1024) state->events[state->count++] = e;
+    PinInput* last = state->count ? &state->events[state->count - 1] : NULL;
+    // 只合并相邻的指针移动，不跨过点击、滚轮或按键事件。
+    if (e.kind == 0 && e.flags == PTR_FLAGS_MOVE && last && last->kind == 0 && last->flags == PTR_FLAGS_MOVE)
+        *last = e;
+    else if (state->count < 1024) state->events[state->count++] = e;
     else atomic_store(&state->stop, 1); // 队列满时断开，避免丢失按键释放。
+    SetEvent(state->inputReady);
     pthread_mutex_unlock(&state->mu);
 }
 - (void)mouse:(NSEvent*)e flags:(UINT16)flags {
@@ -308,9 +322,12 @@ void* pin_rdp_new(uintptr_t parent) {
     v->state = calloc(1, sizeof(PinState));
     if (!v->state) { [v release]; return NULL; }
     pthread_mutex_init(&v->state->mu, NULL); atomic_init(&v->state->refs, 1);
+    v->state->inputReady = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!v->state->inputReady) { [v release]; return NULL; }
     v->keys = [[NSMutableSet alloc] init];
     [v setHidden:YES]; [window.contentView addSubview:v];
-    v->timer = [NSTimer scheduledTimerWithTimeInterval:1.0/30 target:v selector:@selector(tick:) userInfo:nil repeats:YES];
+    v->timer = [NSTimer timerWithTimeInterval:1.0/60 target:v selector:@selector(tick:) userInfo:nil repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:v->timer forMode:NSRunLoopCommonModes];
     [window setAcceptsMouseMovedEvents:YES];
     return v;
 }
@@ -369,6 +386,7 @@ void pin_rdp_close(void* p) {
     PinRDPView* v = p; PinState* s = v->state;
     atomic_store(&s->stop, 1);
     pthread_mutex_lock(&s->mu);
+    SetEvent(s->inputReady);
     if (s->instance) { BOOL aborted = freerdp_abort_connect_context(s->instance->context); (void)aborted; }
     pthread_mutex_unlock(&s->mu);
     [v->timer invalidate]; [v removeFromSuperview]; [v release];

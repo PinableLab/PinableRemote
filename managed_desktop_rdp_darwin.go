@@ -18,7 +18,7 @@ import (
 	"github.com/si-mods/MyVNC/viewer"
 )
 
-// loadSavedRDP reads this app's own settings, Keychain and known_hosts.json.
+// loadSavedRDP reads this app's own settings and known_hosts.json.
 func loadSavedRDP() ([]savedRDP, error) {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
@@ -29,14 +29,21 @@ func loadSavedRDP() ([]savedRDP, error) {
 		return nil, err
 	}
 	known := &viewer.KnownHosts{Path: filepath.Join(dir, "known_hosts.json")}
-	cred := func(addr string) (credential, bool) {
-		b, err := mygo.Secrets.Get(secretKey(addr))
-		if err != nil {
-			return credential{}, false
-		}
-		return decodeCredential(b)
+	return savedRDPComputers(&cfg, known.CertFingerprintFor), nil
+}
+
+// savedRDPPassword reads the remembered password once the user approved the
+// connection; the Keychain may ask first after this program was updated.
+func savedRDPPassword(s savedRDP) (string, bool) {
+	b, err := mygo.Secrets.Get(secretKey(s.addr))
+	if err != nil {
+		return "", false
 	}
-	return savedRDPComputers(&cfg, cred, known.CertFingerprintFor), nil
+	c, ok := decodeCredential(b)
+	if !ok || c.Pass == "" || (c.User != "" && c.User != s.User) {
+		return "", false
+	}
+	return c.Pass, true
 }
 
 func runManagedDesktopRDPList(args []string) int {
@@ -108,7 +115,11 @@ func runManagedDesktopRDP(args []string) int {
 		if s.ID != id {
 			continue
 		}
-		connect := managedrdp.NewPinnedFreeRDPViewer(s.Host, s.Port, s.domain, s.account, s.password, s.pin)
+		password, ok := savedRDPPassword(s)
+		if !ok {
+			return 1
+		}
+		connect := managedrdp.NewPinnedFreeRDPViewer(s.Host, s.Port, s.domain, s.account, password, s.pin)
 		if managedrdp.ServeStored(context.Background(), os.Stdin, os.Stdout, connect) != nil {
 			return 1
 		}

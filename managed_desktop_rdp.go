@@ -30,12 +30,13 @@ type desktopRDPDevice struct {
 }
 
 // savedRDP is a saved computer with what a session needs, all of it the
-// user's own choices in this app: the remembered account and password, and
-// the certificate trusted at its first connection.
+// user's own choices in this app: the account remembered with its password,
+// and the certificate trusted at its first connection. The password itself
+// is read only to connect, so listing never waits on a Keychain prompt.
 type savedRDP struct {
 	desktopRDPDevice
-	domain, account, password string
-	pin                       [32]byte
+	addr, domain, account string
+	pin                   [32]byte
 }
 
 // desktopRDPID names a saved server without revealing it.
@@ -45,23 +46,24 @@ func desktopRDPID(server string) string {
 }
 
 // savedRDPComputers returns the saved Remote Desktop computers that can be
-// connected without asking anything: those with a remembered password and
-// a trusted certificate. Others are left out, not offered half-configured.
-func savedRDPComputers(cfg *viewer.Config, cred func(addr string) (credential, bool), cert func(addr string) (string, error)) []savedRDP {
+// connected without asking anything: those whose password was remembered
+// (connectRDP records the account and time together with it) and whose
+// certificate is trusted. Others are left out, not offered half-configured.
+func savedRDPComputers(cfg *viewer.Config, cert func(addr string) (string, error)) []savedRDP {
 	var out []savedRDP
+	if !cfg.Remember {
+		return nil
+	}
 	for _, server := range cfg.Servers {
 		t, err := viewer.ParseURL(server)
 		if err != nil || t.Scheme != viewer.SchemeRDP {
 			continue
 		}
 		addr := t.Addr()
-		c, ok := cred(addr)
-		if !ok || c.Pass == "" {
+		computer := cfg.Computers[server]
+		user := computer.Username
+		if user == "" || computer.Last.IsZero() {
 			continue
-		}
-		user := c.User
-		if user == "" {
-			user = cfg.Computers[server].Username
 		}
 		domain, account := "", user
 		if i := strings.LastIndex(user, `\`); i >= 0 {
@@ -80,7 +82,7 @@ func savedRDPComputers(cfg *viewer.Config, cred func(addr string) (credential, b
 		} else {
 			copy(pin[:], b)
 		}
-		name := cfg.Computers[server].Name
+		name := computer.Name
 		if name == "" {
 			name = t.Host
 		}
@@ -90,7 +92,7 @@ func savedRDPComputers(cfg *viewer.Config, cred func(addr string) (credential, b
 		}
 		out = append(out, savedRDP{
 			desktopRDPDevice: desktopRDPDevice{ID: desktopRDPID(server), Name: name, Host: t.Host, Port: t.Port, User: principal},
-			domain:           domain, account: account, password: c.Pass, pin: pin,
+			addr:             addr, domain: domain, account: account, pin: pin,
 		})
 	}
 	return out

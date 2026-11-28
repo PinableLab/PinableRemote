@@ -100,6 +100,29 @@ func (r *RDP) DPIPercent() int32                               { return 100 }
 func (r *RDP) Scale() int32                                    { return 100 }
 func (r *RDP) SetZoom(percent int32) error                     { return nil }
 func (r *RDP) SetSmartSizing(on bool) error                    { return nil }
+
+// TrustCertificate 设置已信任证书的 SHA256 指纹，须在 Connect 前调用。
+func (r *RDP) TrustCertificate(fingerprint string) {
+	if r.view == nil {
+		return
+	}
+	fp := C.CString(fingerprint)
+	defer C.free(unsafe.Pointer(fp))
+	C.pin_rdp_trust(r.view, fp)
+}
+
+// AcceptedCertificate 返回用户刚选择长期信任的证书指纹，每次选择只返回一次。
+func (r *RDP) AcceptedCertificate() string {
+	if r.view == nil {
+		return ""
+	}
+	var buf [128]C.char
+	if C.pin_rdp_accepted(r.view, &buf[0], 128) == 0 {
+		return ""
+	}
+	return C.GoString(&buf[0])
+}
+
 func (r *RDP) Error() error {
 	if r.view == nil {
 		return nil

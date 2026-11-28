@@ -12,6 +12,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 // FreeRDP 和输入队列仅由协议线程驱动；帧与证书询问通过锁交给主线程。
@@ -25,8 +26,10 @@ typedef struct {
     BOOL dirty;
     PinInput events[1024];
     unsigned count;
-    int certPending, certAnswer;
+    int certPending, certAnswer, certChanged;
     char cert[4096], error[512];
+    // known 是已信任证书的 SHA256；accepted 是用户本次选择长期信任的证书。
+    char known[128], offered[128], accepted[128];
 } PinState;
 typedef struct { rdpContext context; PinState* state; } PinContext;
 
@@ -67,13 +70,21 @@ static BOOL pin_resize(rdpContext* c) {
                     freerdp_settings_get_uint32(c->settings, FreeRDP_DesktopHeight))) return FALSE;
     return pin_paint(c);
 }
-// 每次仅接受当前会话；不静默信任自签名证书，也不写入 FreeRDP 全局信任库。
+// 信任记录由 Go 侧 known_hosts.json 保存，不写入 FreeRDP 全局信任库。
+// 与已信任指纹一致时直接连接；首次或指纹变化时询问用户。
 static DWORD pin_cert(freerdp* f, const char* host, UINT16 port, const char* cn,
                       const char* subject, const char* issuer, const char* fingerprint, DWORD flags) {
     PinState* s = pin_state(f->context);
     pthread_mutex_lock(&s->mu);
+    const char* fp = fingerprint ? fingerprint : "";
+    if (s->known[0] && fp[0] && strcasecmp(s->known, fp) == 0) {
+        pthread_mutex_unlock(&s->mu);
+        return 2;
+    }
     snprintf(s->cert, sizeof(s->cert), "%s:%u\n\nSubject: %s\nIssuer: %s\nSHA256: %s",
-             host, port, subject ? subject : "", issuer ? issuer : "", fingerprint ? fingerprint : "");
+             host, port, subject ? subject : "", issuer ? issuer : "", fp);
+    snprintf(s->offered, sizeof(s->offered), "%s", fp);
+    s->certChanged = s->known[0] != 0;
     s->certAnswer = 0; s->certPending = 1;
     pthread_mutex_unlock(&s->mu);
     // 用户不确认时超时拒绝；关闭窗口也不能遗留认证线程。
@@ -191,7 +202,7 @@ static void* pin_worker(void* arg) {
         state->dirty = NO;
         [self setNeedsDisplay:YES];
     }
-    BOOL cert = state->certPending == 1;
+    BOOL cert = state->certPending == 1, changed = state->certChanged != 0;
     NSString* details = cert ? [[NSString alloc] initWithUTF8String:state->cert] : nil;
     if (cert) state->certPending = 2;
     pthread_mutex_unlock(&state->mu);
@@ -199,14 +210,22 @@ static void* pin_worker(void* arg) {
         [self retain]; // 证书确认期间关闭主窗口不能释放当前回调的状态。
         BOOL zh = [[[NSLocale preferredLanguages] firstObject] hasPrefix:@"zh"];
         NSAlert* alert = [[NSAlert alloc] init];
-        alert.messageText = zh ? @"无法验证 RDP 服务器证书" : @"RDP server certificate could not be verified";
-        alert.informativeText = [NSString stringWithFormat:@"%@\n\n%@", details,
-            zh ? @"仅当你已通过可信渠道核对指纹时继续。本次授权仅用于当前连接。" : @"Continue only after verifying the fingerprint through a trusted channel. This approval applies only to this connection."];
+        if (changed) {
+            alert.alertStyle = NSAlertStyleCritical;
+            alert.messageText = zh ? @"RDP 服务器证书已变化" : @"RDP server certificate has changed";
+            alert.informativeText = [NSString stringWithFormat:@"%@\n\n%@", details,
+                zh ? @"与之前信任的证书不同，可能是服务器重装或证书更新，也可能是攻击。确认无误后才信任新证书。" : @"It differs from the certificate trusted before. The server may have been reinstalled or renewed its certificate, or this may be an attack. Trust the new certificate only if you expected this."];
+        } else {
+            alert.messageText = zh ? @"首次连接此 RDP 服务器" : @"First connection to this RDP server";
+            alert.informativeText = [NSString stringWithFormat:@"%@\n\n%@", details,
+                zh ? @"此证书不受系统信任，常见于 Windows 自签名证书。信任后会记住此设备，证书不变时不再询问。" : @"The system does not trust this certificate, which is common for self-signed Windows certificates. Once trusted, this device is remembered and you will not be asked again while the certificate stays the same."];
+        }
         [alert addButtonWithTitle:zh ? @"取消" : @"Cancel"];
-        [alert addButtonWithTitle:zh ? @"本次连接信任" : @"Trust for this connection"];
+        [alert addButtonWithTitle:zh ? @"信任此设备" : @"Trust this device"];
         NSModalResponse response = [alert runModal];
         pthread_mutex_lock(&state->mu);
         state->certAnswer = response == NSAlertSecondButtonReturn ? 1 : -1;
+        if (state->certAnswer == 1) snprintf(state->accepted, sizeof(state->accepted), "%s", state->offered);
         pthread_mutex_unlock(&state->mu);
         [alert release];
         [self release];
@@ -362,6 +381,15 @@ void pin_rdp_size(void* p, int* w, int* h) {
 void pin_rdp_client_rect(uintptr_t parent, int* w, int* h) {
     NSWindow* window = (NSWindow*)parent;
     *w = window.contentView.bounds.size.width; *h = window.contentView.bounds.size.height;
+}
+void pin_rdp_trust(void* p, const char* fingerprint) {
+    PinState* s = ((PinRDPView*)p)->state;
+    pthread_mutex_lock(&s->mu); snprintf(s->known, sizeof(s->known), "%s", fingerprint); pthread_mutex_unlock(&s->mu);
+}
+int pin_rdp_accepted(void* p, char* buf, int size) {
+    PinState* s = ((PinRDPView*)p)->state;
+    pthread_mutex_lock(&s->mu); snprintf(buf, size, "%s", s->accepted); s->accepted[0] = 0; pthread_mutex_unlock(&s->mu);
+    return buf[0] != 0;
 }
 int pin_rdp_error(void* p, char* buf, int size) {
     PinState* s = ((PinRDPView*)p)->state;

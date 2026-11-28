@@ -220,6 +220,7 @@ func (a *app) rdpView(c *ui.Context, t *tab) {
 		// A dialog of the window, as the close question, would be under
 		// the control: it steps aside while one shows.
 		// 跨平台后端异步建立连接，及时显示认证或网络失败，避免停留在黑屏。
+		a.rememberRDPCert(t.rdp, t.rdpDial)
 		if backend, ok := any(t.rdp).(interface{ Error() error }); ok {
 			if err := backend.Error(); err != nil {
 				t.errText = err.Error()

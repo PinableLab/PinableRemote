@@ -1331,6 +1331,26 @@ func (a *app) disconnect() {
 	}
 }
 
+// rdpCertPinner is a backend that checks the server certificate itself and
+// leaves remembering it to the app, as the FreeRDP one on macOS.
+type rdpCertPinner interface {
+	TrustCertificate(fingerprint string)
+	AcceptedCertificate() string
+}
+
+// rememberRDPCert keeps a certificate the user chose to trust for addr.
+func (a *app) rememberRDPCert(r *win32.RDP, addr string) {
+	pin, ok := any(r).(rdpCertPinner)
+	if !ok {
+		return
+	}
+	if fp := pin.AcceptedCertificate(); fp != "" {
+		if err := a.known.AddCertFingerprint(addr, fp); err != nil {
+			a.log.Error("saving the RDP certificate", "addr", addr, "err", err)
+		}
+	}
+}
+
 // connectRDP starts an embedded Microsoft Remote Desktop session. The
 // system ActiveX control brings NLA, codecs, audio and clipboard.
 func (a *app) connectRDP(t *tab, target viewer.Target, server string) {
@@ -1351,6 +1371,7 @@ func (a *app) connectRDP(t *tab, target viewer.Target, server string) {
 	a.cfg.Username = a.user
 	a.saveConfig()
 	addr := target.Addr()
+	t.rdpDial = addr
 	user, pass := a.user, t.pass // what was typed for this computer only
 	if c := a.cfg.Computers[server]; user == "" && c.Username != "" {
 		user = c.Username
@@ -1388,6 +1409,13 @@ func (a *app) connectRDP(t *tab, target viewer.Target, server string) {
 		r.SetDesktop(fw, fh)
 	} else {
 		r.SetDesktop(t.rdpFixW, t.rdpFixH)
+	}
+	if pin, ok := any(r).(rdpCertPinner); ok {
+		if fp, err := a.known.CertFingerprintFor(addr); err != nil {
+			a.log.Warn("RDP known certificate", "err", err)
+		} else if fp != "" {
+			pin.TrustCertificate(fp)
+		}
 	}
 	if err := r.Connect(host, port, user, pass, domain); err != nil {
 		a.log.Warn("RDP connect", "err", err)
@@ -1486,10 +1514,11 @@ func (a *app) disconnectRDP(t *tab) {
 		t.rdpResize = nil
 	}
 	if t.rdp != nil {
+		a.rememberRDPCert(t.rdp, t.rdpDial)
 		t.rdp.Close()
 		t.rdp = nil
 	}
-	t.rdpAddr = ""
+	t.rdpAddr, t.rdpDial = "", ""
 	a.setTitle(t, false)
 	a.updateGrab()
 }

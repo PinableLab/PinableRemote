@@ -10,4 +10,6 @@ void pin_rdp_close(void*);
 int pin_rdp_connected(void*);
 void pin_rdp_size(void*, int*, int*);
 void pin_rdp_client_rect(uintptr_t, int*, int*);
+void pin_rdp_trust(void*, const char*);
+int pin_rdp_accepted(void*, char*, int);
 int pin_rdp_error(void*, char*, int);

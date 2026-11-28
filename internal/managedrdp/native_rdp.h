@@ -5,7 +5,8 @@
 #include <stdint.h>
 typedef struct pinable_rdp pinable_rdp;
 pinable_rdp *pinable_rdp_new(const char *host, uint16_t port, const char *domain,
-  const char *user, const char *password, const char *ca, size_t ca_len);
+  const char *user, const char *password, const char *ca, size_t ca_len,
+  const unsigned char *pin_sha256);
 int pinable_rdp_connect(pinable_rdp *driver);
 void pinable_rdp_abort(pinable_rdp *driver);
 int pinable_rdp_poll(pinable_rdp *driver);

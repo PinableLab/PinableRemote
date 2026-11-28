@@ -1,4 +1,4 @@
-//go:build windows && cgo && pinable_freerdp
+//go:build (windows && cgo && pinable_freerdp) || (darwin && cgo && freerdp)
 
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -6,8 +6,10 @@ package managedrdp
 
 /*
 
-#cgo CFLAGS: -D__STDC_NO_THREADS__=1
-#cgo LDFLAGS: -lfreerdp3 -lwinpr3 -lcrypto -lws2_32
+#cgo windows CFLAGS: -D__STDC_NO_THREADS__=1
+#cgo windows LDFLAGS: -lfreerdp3 -lwinpr3 -lcrypto -lws2_32
+#cgo darwin CFLAGS: -Wno-deprecated-declarations
+#cgo darwin LDFLAGS: -lfreerdp3 -lwinpr3 -framework Foundation
 #include <stdlib.h>
 #include <string.h>
 #include "native_rdp.h"
@@ -42,24 +44,54 @@ func NewFreeRDPViewer(host string, port int, domain, user string, caPEM []byte) 
 			len(ca) == 0 || len(ca) > 64<<10 || b.AllowInput {
 			return nil, errNativeSession
 		}
-		viewer := &nativeViewer{
-			requests: make(chan viewerRequest),
-			stop:     make(chan struct{}),
-			done:     make(chan struct{}),
-		}
-		ready := make(chan bool, 1)
-		go viewer.run(ctx, b, domain, user, ca, ready)
-		select {
-		case ok := <-ready:
-			if ok && ctx.Err() == nil {
-				return viewer, nil
-			}
-			_ = viewer.Close()
-		case <-ctx.Done():
-			viewer.stopOnce()
-		}
-		return nil, errNativeSession
+		return startViewer(ctx, b, domain, user, trust{ca: ca})
 	}
+}
+
+// NewPinnedFreeRDPViewer is NewFreeRDPViewer for a server whose certificate
+// the user trusted in PinableRemote: only the leaf with SHA-256 pin is
+// accepted. The password comes from PinableRemote's own credential store,
+// never from the broker pipe; domain may be empty for a local account.
+func NewPinnedFreeRDPViewer(host string, port int, domain, user, password string, pin [32]byte) Connect {
+	principal := user
+	if domain != "" {
+		principal = domain + `\` + user
+	}
+	return func(ctx context.Context, b Binding) (Driver, error) {
+		if !validStoredBinding(b) || b.Host != host || b.Port != port || b.User != principal ||
+			(domain != "" && !validPrincipalPart(domain)) || !validPrincipalPart(user) ||
+			password == "" || strings.ContainsRune(password, 0) || pin == ([32]byte{}) || b.AllowInput {
+			return nil, errNativeSession
+		}
+		b.Password = password
+		return startViewer(ctx, b, domain, user, trust{pin: &pin})
+	}
+}
+
+// trust is exactly one of an explicit CA or a pinned leaf certificate.
+type trust struct {
+	ca  []byte
+	pin *[32]byte
+}
+
+func startViewer(ctx context.Context, b Binding, domain, user string, t trust) (Driver, error) {
+	viewer := &nativeViewer{
+		requests: make(chan viewerRequest),
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	ready := make(chan bool, 1)
+	go viewer.run(ctx, b, domain, user, t, ready)
+	select {
+	case ok := <-ready:
+		if ok && ctx.Err() == nil {
+			return viewer, nil
+		}
+		_ = viewer.Close()
+	case <-ctx.Done():
+		viewer.stopOnce()
+	}
+	return nil, errNativeSession
 }
 
 func validPrincipalPart(s string) bool {
@@ -86,11 +118,11 @@ type viewerResponse struct {
 	err    error
 }
 
-func (v *nativeViewer) run(handshake context.Context, b Binding, domain, user string, ca []byte, ready chan<- bool) {
+func (v *nativeViewer) run(handshake context.Context, b Binding, domain, user string, t trust, ready chan<- bool) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(v.done)
-	s := newNativeSession(b, domain, user, ca)
+	s := newNativeSession(b, domain, user, t)
 	b.Password = ""
 	if s == nil {
 		ready <- false
@@ -150,7 +182,7 @@ func (v *nativeViewer) run(handshake context.Context, b Binding, domain, user st
 	}
 }
 
-func newNativeSession(b Binding, domain, user string, ca []byte) *C.pinable_rdp {
+func newNativeSession(b Binding, domain, user string, t trust) *C.pinable_rdp {
 	h, d, u, p := C.CString(b.Host), C.CString(domain), C.CString(user), C.CString(b.Password)
 	defer C.free(unsafe.Pointer(h))
 	defer C.free(unsafe.Pointer(d))
@@ -159,7 +191,13 @@ func newNativeSession(b Binding, domain, user string, ca []byte) *C.pinable_rdp 
 		clear(unsafe.Slice((*byte)(unsafe.Pointer(p)), len(b.Password)))
 		C.free(unsafe.Pointer(p))
 	}()
-	return C.pinable_rdp_new(h, C.uint16_t(b.Port), d, u, p, (*C.char)(unsafe.Pointer(&ca[0])), C.size_t(len(ca)))
+	if t.pin != nil {
+		pin := (*C.uchar)(C.CBytes(t.pin[:]))
+		defer C.free(unsafe.Pointer(pin))
+		return C.pinable_rdp_new(h, C.uint16_t(b.Port), d, u, p, nil, 0, pin)
+	}
+	ca := t.ca
+	return C.pinable_rdp_new(h, C.uint16_t(b.Port), d, u, p, (*C.char)(unsafe.Pointer(&ca[0])), C.size_t(len(ca)), nil)
 }
 
 func snapshotNative(s *C.pinable_rdp, withFrame bool) viewerResponse {

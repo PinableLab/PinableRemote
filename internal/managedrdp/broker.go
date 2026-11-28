@@ -88,12 +88,19 @@ type result struct {
 }
 
 func validBinding(b Binding) bool {
+	return len(b.Password) > 0 && len(b.Password) <= 4096 && !strings.ContainsRune(b.Password, 0) && validEndpoint(b)
+}
+
+// validStoredBinding is a binding whose password stays in the child's own
+// credential store: the pipe must not carry one.
+func validStoredBinding(b Binding) bool { return b.Password == "" && validEndpoint(b) }
+
+func validEndpoint(b Binding) bool {
 	if b.Port < 1 || b.Port > 65535 || b.TTLSeconds < 1 {
 		return false
 	}
 	if b.TTLSeconds > 1800 || len(b.Host) == 0 || len(b.Host) > 253 ||
-		len(b.User) == 0 || len(b.User) > 256 || len(b.Password) == 0 || len(b.Password) > 4096 ||
-		strings.TrimSpace(b.User) != b.User || strings.ContainsRune(b.Password, 0) {
+		len(b.User) == 0 || len(b.User) > 256 || strings.TrimSpace(b.User) != b.User {
 		return false
 	}
 	for _, r := range b.User {
@@ -151,6 +158,16 @@ func checkedFrame(f Frame) bool {
 // read. Serve owns both pipe handles, closing them on revocation. Send one
 // request at a time and keep stdin open until the last response.
 func Serve(parent context.Context, in io.ReadCloser, out io.WriteCloser, connect Connect) error {
+	return serve(parent, in, out, connect, validBinding)
+}
+
+// ServeStored is Serve for a child that reads the account's password from
+// its own credential store; the open binding must leave the password empty.
+func ServeStored(parent context.Context, in io.ReadCloser, out io.WriteCloser, connect Connect) error {
+	return serve(parent, in, out, connect, validStoredBinding)
+}
+
+func serve(parent context.Context, in io.ReadCloser, out io.WriteCloser, connect Connect, valid func(Binding) bool) error {
 	if connect == nil {
 		return errors.New("RDP driver unavailable")
 	}
@@ -208,7 +225,7 @@ func Serve(parent context.Context, in io.ReadCloser, out io.WriteCloser, connect
 		}
 		open = r
 	}
-	if open.Op != "open" || open.Binding == nil || open.Input != nil || !validBinding(*open.Binding) {
+	if open.Op != "open" || open.Binding == nil || open.Input != nil || !valid(*open.Binding) {
 		return write(result{ID: open.ID, Error: "invalid_binding"})
 	}
 	allow := open.Binding.AllowInput

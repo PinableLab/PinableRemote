@@ -1,18 +1,31 @@
-//go:build windows && cgo && pinable_freerdp
+//go:build (windows && cgo && pinable_freerdp) || (darwin && cgo && freerdp)
 
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <strings.h>
+#define _stricmp strcasecmp
+#endif
 #include "native_rdp.h"
 #include <winpr/synch.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef _WIN32
+/* 显式 CA 校验只在 Windows SDK 中提供 OpenSSL 头文件。 */
 #include <openssl/pem.h>
 #include <openssl/x509v3.h>
+#else
+typedef struct x509_store_st X509_STORE;
+#define X509_STORE_free(store) ((void)(store))
+#endif
+#include <freerdp/crypto/certificate.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
@@ -23,6 +36,8 @@
 typedef struct pinable_rdp {
     rdpContext context;
     X509_STORE *trust;
+    unsigned char pin[32];
+    int pinned;
     char *host;
     char *domain;
     char *user;
@@ -34,6 +49,31 @@ typedef struct pinable_rdp {
     int connected;
     rdpTransportLayer *(*connect_layer)(rdpTransport *, const char *, int, DWORD);
 } Session;
+/* 用户已在 PinableRemote 中信任此证书；只比较叶证书 SHA256，不查系统 CA。 */
+static int verify_pin(Session *s, const unsigned char *pem, size_t length,
+                      const char *host, uint16_t port, uint32_t flags)
+{
+	if (!s || !s->pinned || !host || !pem || strcmp(host, s->host) != 0 || port != s->port
+	    || (flags & ~VERIFY_CERT_FLAG_FP_IS_PEM) != 0 || length == 0 || length > (256 * 1024))
+		return 0;
+	char *text = malloc(length + 1);
+	if (!text) return 0;
+	memcpy(text, pem, length);
+	text[length] = 0;
+	rdpCertificate *leaf = freerdp_certificate_new_from_pem(text);
+	free(text);
+	size_t size = 0;
+	char *digest = leaf ? freerdp_certificate_get_hash(leaf, "sha256", &size) : NULL;
+	int ok = digest && size == sizeof(s->pin);
+	unsigned char diff = 0;
+	for (size_t i = 0; ok && i < sizeof(s->pin); i++)
+		diff |= (unsigned char)digest[i] ^ s->pin[i];
+	free(digest);
+	freerdp_certificate_free(leaf);
+	return ok && diff == 0;
+}
+
+#ifdef _WIN32
 static int verify_chain(Session *s, const unsigned char *pem, size_t length,
                         const char *host, uint16_t port, uint32_t flags)
 {
@@ -76,12 +116,21 @@ done:
 	BIO_free(bio);
 	return ok;
 }
+#else
+static int verify_chain(Session *s, const unsigned char *pem, size_t length,
+                        const char *host, uint16_t port, uint32_t flags)
+{
+	(void)s; (void)pem; (void)length; (void)host; (void)port; (void)flags;
+	return 0;
+}
+#endif
 
 static int verify_x509(freerdp *instance, const BYTE *data, size_t length,
                        const char *hostname, UINT16 port, DWORD flags)
 {
 	Session *s = (Session *)instance->context;
-	s->identity = verify_chain(s, data, length, hostname, port, flags);
+	s->identity = s->pinned ? verify_pin(s, data, length, hostname, port, flags)
+	                        : verify_chain(s, data, length, hostname, port, flags);
 	s->logged_on = 0;
 	s->generation = 0;
 	return s->identity ? 2 : 0; /* session-only, never trust unknown certs */
@@ -102,8 +151,10 @@ static BOOL session_info(rdpContext *context, UINT32 type, const void *data)
 		const logon_info *info = data;
 		const char *requested = s->user;
 		const char *domain = s->domain;
-		s->logged_on = s->identity && info && info->domain && domain &&
-		               _stricmp(info->domain, domain) == 0 && info->username && requested &&
+		/* 本地账户不填域时，只核对用户名；域由远端报告为计算机名。 */
+		s->logged_on = s->identity && info && domain &&
+		               (!domain[0] || (info->domain && _stricmp(info->domain, domain) == 0)) &&
+		               info->username && requested &&
 		               _stricmp(info->username, requested) == 0;
 		s->generation = 0;
 		return s->logged_on;
@@ -185,7 +236,7 @@ static BOOL configure(freerdp *instance, const char *host, uint16_t port,
 	if (!s->host || !s->domain || !s->user ||
 	    !freerdp_settings_set_string(settings, FreeRDP_ServerHostname, host) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, port) ||
-	    !freerdp_settings_set_string(settings, FreeRDP_Domain, domain) ||
+	    !freerdp_settings_set_string(settings, FreeRDP_Domain, domain[0] ? domain : NULL) ||
 	    !freerdp_settings_set_string(settings, FreeRDP_Username, user) ||
 	    !freerdp_settings_set_string(settings, FreeRDP_Password, password) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_AuthenticationLevel, 1) ||
@@ -241,9 +292,11 @@ void pinable_rdp_free(Session *s)
 }
 
 Session *pinable_rdp_new(const char *host, uint16_t port, const char *domain,
-                        const char *user, const char *password, const char *ca, size_t ca_len)
+                        const char *user, const char *password, const char *ca, size_t ca_len,
+                        const unsigned char *pin)
 {
-	if (!ca || ca_len == 0 || ca_len > (64U << 10)) return NULL;
+	/* 恰好一种信任来源：显式 CA 或用户信任过的证书指纹。 */
+	if (pin ? ca != NULL : (!ca || ca_len == 0 || ca_len > (64U << 10))) return NULL;
 	freerdp *instance = freerdp_new();
 	if (!instance) return NULL;
 	instance->ContextSize = sizeof(Session);
@@ -252,6 +305,19 @@ Session *pinable_rdp_new(const char *host, uint16_t port, const char *domain,
 		return NULL;
 	}
 	Session *s = (Session *)instance->context;
+	if (pin) {
+		memcpy(s->pin, pin, sizeof(s->pin));
+		s->pinned = 1;
+		if (!configure(instance, host, port, domain, user, password)) {
+			pinable_rdp_free(s);
+			return NULL;
+		}
+		return s;
+	}
+#ifndef _WIN32
+	pinable_rdp_free(s);
+	return NULL;
+#else
 	s->trust = X509_STORE_new();
 	BIO *bio = BIO_new_mem_buf(ca, (int)ca_len);
 	X509 *root = bio ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : NULL;
@@ -264,6 +330,7 @@ Session *pinable_rdp_new(const char *host, uint16_t port, const char *domain,
 		return NULL;
 	}
 	return s;
+#endif
 }
 
 int pinable_rdp_connect(Session *s)

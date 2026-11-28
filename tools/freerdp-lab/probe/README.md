@@ -6,6 +6,21 @@ Experimental Linux fixture for the proposed managedrdp.Driver native seam, not a
 2. Run bash probe/build-sdk.sh. It downloads the official immutable release, verifies the 3.33.1 release asset SHA-256, and builds under the folder.
 3. Run bash probe/test.sh. The fixture compiles with warnings as errors except upstream deprecation annotations; its C code installs Linux seccomp blocking socket/connect before creating the library contexts. Expect a deliberate negotiation-error log from the overridden transport followed by PASS.
 
+## Windows x64 SDK smoke (MSYS2 UCRT64)
+
+Use an isolated MSYS2 UCRT64 shell with the signed `mingw-w64-ucrt-x86_64-gcc`,
+`mingw-w64-ucrt-x86_64-freerdp`, `mingw-w64-ucrt-x86_64-openssl`, and
+`mingw-w64-ucrt-x86_64-pkgconf` packages installed. The script requires
+FreeRDP 3.33.1 just like the Linux run. From the lab directory, run
+`bash probe/test.sh`.
+
+The Windows executable never calls `freerdp_connect`; only the Linux build
+tests the connect hook, under seccomp. Windows verifies SDK linkage, synthetic
+server identity rejection/acceptance, and first-frame gating across two
+isolated contexts. This is not proof of a Windows RDP handshake, native
+desktop capture or input delivery. The MSYS2 packages are lab dependencies,
+not part of PinableRemote packaging.
+
 Verified: CA chain and exact SAN; rejection of untrusted CA, mismatched hostname/port, and forwarded/redirected identity; a named account fixture before first paint; padded surface stride copy without leaking another context; blocked transport callback receives approved endpoint even with HTTPS_PROXY; and context-owned input API linkage. Tested with Linux amd64 GCC, OpenSSL 3.5.9, workspace-only Debian-archive-verified CMake 3.31.6/Ninja 1.12.1.
 
 Not verified: actual NLA negotiation, event ordering and account/domain mapping on Windows; complete actual decoded frame/cursor and delivery of remote pointer/keys; redirect handling in a live server handshake; Windows packaging or trust path. Initialize real GDI only in PostConnect, after negotiated cache creation. The fixture supplies known in-memory synthetic pixels rather than faking a complete RDP connection.

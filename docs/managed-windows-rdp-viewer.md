@@ -46,3 +46,19 @@ Desktop, verify a trusted Windows target, rejection of the wrong certificate
 and account, revocation while idle and mid-handshake, and behavior on resize
 and server disconnect. Verify real Windows logon announcements before treating
 a server as compatible. Missing named-logon evidence leaves capture disabled.
+
+For an authorized Windows QA endpoint, set the following only in the local
+test process environment: `PINABLE_QA_RDP_LIVE=1`, `PINABLE_QA_RDP_HOST`,
+`PINABLE_QA_RDP_PORT`, `PINABLE_QA_RDP_DOMAIN`, `PINABLE_QA_RDP_USER`,
+`PINABLE_QA_RDP_CA_PEM` (the enrolled CA file), and
+`PINABLE_QA_RDP_PASSWORD` (local disposable account credential). Do not
+place credentials in the repository, command history, or chat. Remove the
+test credential from the environment when done. Run the opt-in check with:
+
+```powershell
+go test -tags pinable_freerdp ./internal/managedrdp -run '^TestFreeRDPViewerLive$' -count=1 -v
+```
+
+The live test verifies the handshake, a decoded in-session frame after the
+handshake context is canceled, and that capture is denied after close. It
+does not save frames or send input.
